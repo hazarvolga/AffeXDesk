@@ -1,5 +1,7 @@
 # AffeXDesk
 
+**English** · [Türkçe](./README.tr.md)
+
 **Open-Source Developer & Founder Mission Control** — built with **Tauri 2**, **Rust**, **React 19**, **TypeScript**, **Three.js (WebGL2)**, **GSAP**, and local **SQLite**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg)](./LICENSE)

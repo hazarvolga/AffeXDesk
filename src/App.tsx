@@ -4,10 +4,12 @@ import {
   CheckCircle2,
   Clapperboard,
   Cpu,
+  Flame,
   FolderGit2,
   GitBranch,
   HardDrive,
   LayoutDashboard,
+  MemoryStick,
   Settings,
   ShieldAlert,
   Sparkles,
@@ -23,7 +25,7 @@ import {
   type WorkspaceRecord,
   type WorkspaceScanReport,
 } from "./lib/api";
-import { formatBytes } from "./lib/format";
+import { formatBytes, formatPct, formatUptime } from "./lib/format";
 import {
   OverviewView,
   type NavTab,
@@ -480,6 +482,145 @@ export default function App() {
       </aside>
 
       <main className="main-content">
+        {activeTab !== "overview" && metrics && (
+          <div
+            className="telemetry-ribbon"
+            role="region"
+            aria-label="Canlı Sistem Telemetrisi"
+          >
+            <button
+              type="button"
+              className="telemetry-ribbon__item"
+              onClick={() => setActiveTab("overview")}
+              title="Genel Bakış ekranına git"
+            >
+              <Cpu size={13} className="text-cyan" />
+              <span className="telemetry-ribbon__label">CPU</span>
+              <strong className="telemetry-ribbon__value tabular">
+                {formatPct(metrics.cpu_usage_pct)}
+              </strong>
+              <span className="telemetry-ribbon__bar">
+                <span
+                  className={`telemetry-ribbon__fill ${
+                    metrics.cpu_usage_pct > 85
+                      ? "progress-fill--danger"
+                      : metrics.cpu_usage_pct > 65
+                      ? "progress-fill--warning"
+                      : "progress-fill--cyan"
+                  }`}
+                  style={{ width: `${Math.min(100, metrics.cpu_usage_pct)}%` }}
+                />
+              </span>
+              <span className="telemetry-ribbon__meta tabular">
+                {metrics.cpu_cores}c
+              </span>
+            </button>
+
+            <span className="telemetry-ribbon__sep" aria-hidden="true" />
+
+            <button
+              type="button"
+              className="telemetry-ribbon__item"
+              onClick={() => setActiveTab("processes")}
+              title="Süreçler ve RAM dağılımını aç"
+            >
+              <MemoryStick size={13} className="text-indigo" />
+              <span className="telemetry-ribbon__label">RAM</span>
+              <strong className="telemetry-ribbon__value tabular">
+                {formatPct(metrics.mem_used_pct)}
+              </strong>
+              <span className="telemetry-ribbon__bar">
+                <span
+                  className={`telemetry-ribbon__fill ${
+                    metrics.mem_pressure === "critical"
+                      ? "progress-fill--danger"
+                      : metrics.mem_pressure === "elevated"
+                      ? "progress-fill--warning"
+                      : "progress-fill--indigo"
+                  }`}
+                  style={{ width: `${Math.min(100, metrics.mem_used_pct)}%` }}
+                />
+              </span>
+              <span className="telemetry-ribbon__meta tabular">
+                {formatBytes(metrics.mem_used_bytes)} /{" "}
+                {formatBytes(metrics.mem_total_bytes)}
+              </span>
+            </button>
+
+            <span className="telemetry-ribbon__sep" aria-hidden="true" />
+
+            <button
+              type="button"
+              className="telemetry-ribbon__item"
+              onClick={() => setActiveTab("disk")}
+              title="Disk Analizi ekranına git"
+            >
+              <HardDrive size={13} className="text-emerald" />
+              <span className="telemetry-ribbon__label">Disk</span>
+              <strong className="telemetry-ribbon__value tabular">
+                {formatPct(metrics.disk_used_pct)}
+              </strong>
+              <span className="telemetry-ribbon__bar">
+                <span
+                  className={`telemetry-ribbon__fill ${
+                    metrics.disk_used_pct > 85
+                      ? "progress-fill--danger"
+                      : metrics.disk_used_pct > 75
+                      ? "progress-fill--warning"
+                      : "progress-fill--emerald"
+                  }`}
+                  style={{ width: `${Math.min(100, metrics.disk_used_pct)}%` }}
+                />
+              </span>
+              <span className="telemetry-ribbon__meta tabular">
+                {formatBytes(metrics.disk_available_bytes)} boş
+              </span>
+            </button>
+
+            <span className="telemetry-ribbon__sep" aria-hidden="true" />
+
+            <div className="telemetry-ribbon__item telemetry-ribbon__item--static">
+              <Flame
+                size={13}
+                className={
+                  metrics.thermal_state === "critical" ||
+                  metrics.thermal_state === "hot"
+                    ? "text-warning"
+                    : "muted"
+                }
+              />
+              <span className="telemetry-ribbon__label">Termal</span>
+              <strong className="telemetry-ribbon__value tabular">
+                {metrics.temperature_c !== null
+                  ? `${Math.round(metrics.temperature_c)}°C`
+                  : "—"}
+              </strong>
+              <span
+                className={`badge ${
+                  metrics.thermal_state === "critical"
+                    ? "badge--danger"
+                    : metrics.thermal_state === "hot" ||
+                      metrics.thermal_state === "warm"
+                    ? "badge--warning"
+                    : "badge--success"
+                }`}
+              >
+                {metrics.thermal_state === "critical"
+                  ? "Kritik"
+                  : metrics.thermal_state === "hot"
+                  ? "Sıcak"
+                  : metrics.thermal_state === "warm"
+                  ? "Ilık"
+                  : "Nominal"}
+              </span>
+            </div>
+
+            <div className="telemetry-ribbon__right mono tabular">
+              {formatUptime(metrics.uptime_secs)}
+            </div>
+          </div>
+        )}
+
         {toast && (
           <div
             role="status"

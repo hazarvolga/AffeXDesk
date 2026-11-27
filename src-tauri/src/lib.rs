@@ -1,7 +1,13 @@
+pub mod ai_copilot;
 pub mod commands;
 pub mod db;
+pub mod devops;
+pub mod git_providers;
+pub mod knowledge;
 pub mod opener;
 pub mod processes;
+pub mod social_bridge;
+pub mod studio;
 pub mod telemetry;
 pub mod uptime;
 pub mod workspace;
@@ -33,6 +39,23 @@ pub fn run() {
             commands::open_url,
             commands::get_settings,
             commands::save_settings,
+            commands::check_git_providers,
+            commands::list_remote_repos,
+            commands::clone_repo,
+            commands::create_local_project,
+            commands::fetch_social_snapshot,
+            commands::inspect_knowledge_hub,
+            commands::search_knowledge_hub,
+            commands::check_ai_status,
+            commands::ai_chat,
+            commands::scan_creative_caches,
+            commands::inspect_media_file,
+            commands::pick_media_file,
+            commands::scan_local_ai_models,
+            commands::inspect_docker,
+            commands::docker_container_action,
+            commands::scan_env_hygiene,
+            commands::activate_focus_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AffeXDesk");

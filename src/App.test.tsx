@@ -22,6 +22,23 @@ vi.mock("./lib/api", () => ({
     openUrl: vi.fn(),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
+    checkGitProviders: vi.fn(),
+    listRemoteRepos: vi.fn(),
+    cloneRepo: vi.fn(),
+    createLocalProject: vi.fn(),
+    fetchSocialSnapshot: vi.fn(),
+    inspectKnowledgeHub: vi.fn(),
+    searchKnowledgeHub: vi.fn(),
+    checkAiStatus: vi.fn(),
+    aiChat: vi.fn(),
+    scanCreativeCaches: vi.fn(),
+    inspectMediaFile: vi.fn(),
+    pickMediaFile: vi.fn(),
+    scanLocalAiModels: vi.fn(),
+    inspectDocker: vi.fn(),
+    dockerContainerAction: vi.fn(),
+    scanEnvHygiene: vi.fn(),
+    activateFocusMode: vi.fn(),
   },
 }));
 
@@ -91,9 +108,59 @@ describe("App", () => {
       total_reclaimable_bytes: 0,
     });
     mockedApi.killDevProcess.mockResolvedValue();
+    mockedApi.checkGitProviders.mockResolvedValue({
+      gh_cli_available: true,
+      gh_authenticated: true,
+      gh_user: "dev-user",
+      github_token_configured: false,
+      gitlab_url: "https://gitlab.com",
+      gitlab_token_configured: false,
+    });
+    mockedApi.listRemoteRepos.mockResolvedValue([]);
+    mockedApi.fetchSocialSnapshot.mockResolvedValue({
+      connected: false,
+      endpoint: "http://127.0.0.1:49157/mcp",
+      app_version: null,
+      accounts: [],
+      scheduled_count: 0,
+      pending_review_count: 0,
+      failed_count: 0,
+      published_count: 0,
+      error: "offline",
+    });
+    mockedApi.inspectKnowledgeHub.mockResolvedValue({
+      configured: false,
+      root_dir: null,
+      index_exists: false,
+      search_script_exists: false,
+      dataset_count: 0,
+      datasets: [],
+    });
+    mockedApi.checkAiStatus.mockResolvedValue({
+      online: true,
+      provider: "mlx-serve",
+      base_url: "http://127.0.0.1:11234/v1",
+      model: "qwen3-coder",
+      available_models: ["qwen3-coder"],
+    });
+    mockedApi.aiChat.mockResolvedValue({
+      message: "Sistem sağlıklı görünüyor.",
+      model: "qwen3-coder",
+      fallback: false,
+      actions: [],
+    });
+    mockedApi.scanCreativeCaches.mockResolvedValue([]);
+    mockedApi.scanLocalAiModels.mockResolvedValue([]);
+    mockedApi.inspectDocker.mockResolvedValue({
+      available: false,
+      containers: [],
+      reclaimable_summary: "",
+      error: "Docker çalışmıyor",
+    });
+    mockedApi.scanEnvHygiene.mockResolvedValue([]);
   });
 
-  it("renders sidebar, live telemetry, and switches tabs with Meta/Alt+1..4 shortcuts", async () => {
+  it("renders sidebar, live telemetry, and switches tabs with Meta/Alt+1..7 and Meta/Ctrl+K shortcuts", async () => {
     render(<App />);
 
     expect(screen.getByText("AffeXDesk")).toBeInTheDocument();
@@ -112,9 +179,35 @@ describe("App", () => {
 
     fireEvent.keyDown(window, { key: "4", metaKey: true });
     expect(
+      await screen.findByRole("heading", { name: /Git & Uzak Repolar/i })
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "5", altKey: true });
+    expect(
+      await screen.findByRole("heading", { level: 1, name: /Bilgi Bankası/i })
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "6", metaKey: true });
+    expect(
+      await screen.findByRole("heading", { level: 1, name: /Stüdyo & DevOps/i })
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "7", metaKey: true });
+    expect(
       screen.getByRole("heading", { name: /Ayarlar/i })
     ).toBeInTheDocument();
     expect(screen.getByText("Sosyal Merkez MCP Köprüsü")).toBeInTheDocument();
+
+    // Cmd/Ctrl+K opens AI Drawer and Escape closes it
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(
+      await screen.findByRole("dialog", { name: /Yerel AI Asistan/i })
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", { name: /Yerel AI Asistan/i })
+    ).not.toBeInTheDocument();
   });
 
   it("opens ConfirmDialog before force-killing a process and invokes killDevProcess", async () => {

@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  BookOpen,
   CheckCircle2,
+  Clapperboard,
   Cpu,
   FolderGit2,
+  GitBranch,
   LayoutDashboard,
   Settings,
   ShieldAlert,
+  Sparkles,
   TerminalSquare,
   X,
 } from "lucide-react";
 import {
   api,
   type DevProcessReport,
+  type SocialBridgeSnapshot,
   type SystemMetrics,
   type UptimeResult,
   type WorkspaceRecord,
@@ -26,7 +31,11 @@ import {
 } from "./components/OverviewView";
 import { ProcessesView } from "./components/ProcessesView";
 import { ProjectsView } from "./components/ProjectsView";
+import { GitView } from "./components/GitView";
+import { KnowledgeView } from "./components/KnowledgeView";
+import { StudioDevOpsView } from "./components/StudioDevOpsView";
 import { SettingsView } from "./components/SettingsView";
+import { AiDrawer } from "./components/AiDrawer";
 
 interface ToastMessage {
   id: number;
@@ -43,13 +52,22 @@ const NAV_ITEMS: Array<{
   { id: "overview", label: "Genel Bakış", shortcut: "1", icon: LayoutDashboard },
   { id: "processes", label: "Süreçler", shortcut: "2", icon: Cpu },
   { id: "projects", label: "Projeler", shortcut: "3", icon: FolderGit2 },
-  { id: "settings", label: "Ayarlar", shortcut: "4", icon: Settings },
+  { id: "git", label: "Git / Repolar", shortcut: "4", icon: GitBranch },
+  { id: "knowledge", label: "Bilgi Bankası", shortcut: "5", icon: BookOpen },
+  {
+    id: "studio",
+    label: "Stüdyo & DevOps",
+    shortcut: "6",
+    icon: Clapperboard,
+  },
+  { id: "settings", label: "Ayarlar", shortcut: "7", icon: Settings },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>("overview");
   const [processFilter, setProcessFilter] = useState<ProcessFilter>("all");
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>("all");
+  const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
 
   const [version, setVersion] = useState<string>("0.1.0");
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
@@ -57,6 +75,9 @@ export default function App() {
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [scanReport, setScanReport] = useState<WorkspaceScanReport | null>(null);
   const [uptimeMap, setUptimeMap] = useState<Record<string, UptimeResult>>({});
+  const [socialSnapshot, setSocialSnapshot] =
+    useState<SocialBridgeSnapshot | null>(null);
+  const [loadingSocial, setLoadingSocial] = useState(false);
   const [settings, setSettings] = useState<Record<string, string>>({
     default_ide: "code",
     refresh_interval_secs: "5",
@@ -110,6 +131,18 @@ export default function App() {
     }
   }, []);
 
+  const refreshSocialSnapshot = useCallback(async () => {
+    setLoadingSocial(true);
+    try {
+      const snap = await api.fetchSocialSnapshot();
+      setSocialSnapshot(snap);
+    } catch {
+      // MCP sunucusu kapalıysa sessiz kal
+    } finally {
+      setLoadingSocial(false);
+    }
+  }, []);
+
   // İlk yükleme
   useEffect(() => {
     let cancelled = false;
@@ -124,14 +157,18 @@ export default function App() {
       if (setRes.status === "fulfilled") {
         setSettings((prev) => ({ ...prev, ...setRes.value }));
       }
-      await Promise.all([refreshTelemetry(), refreshWorkspacesAndProjects()]);
+      await Promise.all([
+        refreshTelemetry(),
+        refreshWorkspacesAndProjects(),
+        refreshSocialSnapshot(),
+      ]);
     }
 
     void bootstrap();
     return () => {
       cancelled = true;
     };
-  }, [refreshTelemetry, refreshWorkspacesAndProjects]);
+  }, [refreshTelemetry, refreshWorkspacesAndProjects, refreshSocialSnapshot]);
 
   // Canlı telemetri döngüsü
   useEffect(() => {
@@ -145,9 +182,20 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [settings.refresh_interval_secs, refreshTelemetry]);
 
-  // Meta/Alt + 1..4 klavye kısayolları
+  // Meta/Alt + 1..6 ve Meta/Ctrl + K klavye kısayolları
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "k"
+      ) {
+        event.preventDefault();
+        setAiDrawerOpen((prev) => !prev);
+        return;
+      }
+
       if (!(event.metaKey || event.altKey) || event.ctrlKey || event.shiftKey) {
         return;
       }
@@ -155,7 +203,10 @@ export default function App() {
         "1": "overview",
         "2": "processes",
         "3": "projects",
-        "4": "settings",
+        "4": "git",
+        "5": "knowledge",
+        "6": "studio",
+        "7": "settings",
       };
       const target = map[event.key];
       if (target) {
@@ -297,11 +348,14 @@ export default function App() {
         await api.saveSettings({ settings: next });
         setSettings(next);
         showToast("success", "Ayarlar kaydedildi.");
+        if (next.module_social_bridge === "true") {
+          void refreshSocialSnapshot();
+        }
       } catch (err) {
         showToast("error", `Ayarlar kaydedilemedi: ${String(err)}`);
       }
     },
-    [showToast]
+    [refreshSocialSnapshot, showToast]
   );
 
   const handleOpenFinder = useCallback(
@@ -349,6 +403,10 @@ export default function App() {
       ? { count: scanReport.total_projects, tone: "neutral" as const }
       : null;
 
+  const showSocialCard =
+    settings.module_social_bridge === "true" ||
+    Boolean(socialSnapshot?.connected);
+
   return (
     <div className="app-shell">
       <aside className="sidebar" aria-label="Ana Gezinme">
@@ -394,6 +452,16 @@ export default function App() {
           })}
         </nav>
 
+        <button
+          type="button"
+          className={`ai-trigger-btn ${aiDrawerOpen ? "ai-trigger-btn--active" : ""}`}
+          onClick={() => setAiDrawerOpen(true)}
+        >
+          <Sparkles size={15} className="text-cyan" />
+          <span className="nav-item__label">AI Asistan</span>
+          <kbd className="nav-kbd">⌘K</kbd>
+        </button>
+
         <div className="sidebar__footer">
           <div className="status-dot-row">
             <span className="status-dot status-dot--live" />
@@ -438,10 +506,15 @@ export default function App() {
             workspaces={workspaces}
             scanReport={scanReport}
             uptimeMap={uptimeMap}
+            socialSnapshot={socialSnapshot}
+            showSocialCard={showSocialCard}
+            loadingSocial={loadingSocial}
+            onRefreshSocial={() => void refreshSocialSnapshot()}
             loading={loadingTelemetry || loadingProjects}
             onRefresh={() => {
               void refreshTelemetry();
               void refreshWorkspacesAndProjects();
+              if (showSocialCard) void refreshSocialSnapshot();
             }}
             onAddWorkspace={() => void handleAddWorkspace()}
             onNavigate={handleNavigate}
@@ -478,6 +551,35 @@ export default function App() {
           />
         )}
 
+        {activeTab === "git" && (
+          <GitView
+            workspaces={workspaces}
+            onOpenIde={(p) => void handleOpenIde(p)}
+            onOpenUrl={(u) => void handleOpenUrl(u)}
+            onOpenFinder={(p) => void handleOpenFinder(p)}
+            onNavigateSettings={() => setActiveTab("settings")}
+            onProjectsChanged={refreshWorkspacesAndProjects}
+            onNotify={showToast}
+          />
+        )}
+
+        {activeTab === "knowledge" && (
+          <KnowledgeView
+            settings={settings}
+            onSaveSettings={handleSaveSettings}
+            onOpenFinder={(p) => void handleOpenFinder(p)}
+            onNotify={showToast}
+          />
+        )}
+
+        {activeTab === "studio" && (
+          <StudioDevOpsView
+            onOpenFinder={(p) => void handleOpenFinder(p)}
+            onRefreshTelemetry={refreshTelemetry}
+            onNotify={showToast}
+          />
+        )}
+
         {activeTab === "settings" && (
           <SettingsView
             workspaces={workspaces}
@@ -488,6 +590,15 @@ export default function App() {
           />
         )}
       </main>
+
+      <AiDrawer
+        open={aiDrawerOpen}
+        onClose={() => setAiDrawerOpen(false)}
+        onNavigate={(tab) => setActiveTab(tab)}
+        onRefreshTelemetry={refreshTelemetry}
+        onRefreshWorkspaces={refreshWorkspacesAndProjects}
+        onNotify={showToast}
+      />
     </div>
   );
 }

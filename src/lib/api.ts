@@ -106,6 +106,168 @@ export interface UptimeResult {
   state: UptimeState | string;
 }
 
+export interface GitProviderStatus {
+  gh_cli_available: boolean;
+  gh_authenticated: boolean;
+  gh_user: string | null;
+  github_token_configured: boolean;
+  gitlab_url: string;
+  gitlab_token_configured: boolean;
+}
+
+export interface RemoteRepo {
+  provider: "github" | "gitlab" | string;
+  id: string;
+  name: string;
+  full_name: string;
+  description: string | null;
+  clone_url: string;
+  html_url: string;
+  private: boolean;
+  default_branch: string;
+  language: string | null;
+  updated_at: string;
+  stargazers_count: number;
+}
+
+export interface SocialAccountSummary {
+  id: number;
+  platform: string;
+  display_name: string;
+  status: string;
+}
+
+export interface SocialBridgeSnapshot {
+  connected: boolean;
+  endpoint: string;
+  app_version: string | null;
+  accounts: SocialAccountSummary[];
+  scheduled_count: number;
+  pending_review_count: number;
+  failed_count: number;
+  published_count: number;
+  error: string | null;
+}
+
+export interface DatasetCard {
+  id: string;
+  title: string;
+  path: string;
+  summary: string;
+  size_bytes: number;
+}
+
+export interface KnowledgeOverview {
+  configured: boolean;
+  root_dir: string | null;
+  index_exists: boolean;
+  search_script_exists: boolean;
+  dataset_count: number;
+  datasets: DatasetCard[];
+}
+
+export interface KnowledgeSearchHit {
+  source: string;
+  title: string;
+  snippet: string;
+  path: string | null;
+}
+
+export interface AiStatus {
+  online: boolean;
+  provider: string;
+  base_url: string;
+  model: string;
+  available_models: string[];
+}
+
+export interface CopilotMessage {
+  role: "user" | "assistant" | "system" | string;
+  content: string;
+}
+
+export interface CopilotAction {
+  id: string;
+  kind: string;
+  label: string;
+  description: string;
+  requires_confirmation: boolean;
+  payload: Record<string, unknown>;
+}
+
+export interface CopilotReply {
+  message: string;
+  model: string;
+  fallback: boolean;
+  actions: CopilotAction[];
+}
+
+export interface CreativeCacheItem {
+  id: string;
+  app: string;
+  label: string;
+  path: string;
+  size_bytes: number;
+  exists: boolean;
+}
+
+export interface MediaProbeResult {
+  path: string;
+  file_name: string;
+  size_bytes: number;
+  duration_secs: number;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  video_codec: string | null;
+  audio_codec: string | null;
+  bitrate_kbps: number | null;
+  lufs: number | null;
+  youtube_lufs_ok: boolean | null;
+}
+
+export interface LocalAiModel {
+  id: string;
+  provider: string;
+  state: string;
+  bytes_on_disk: number | null;
+  bytes_resident: number | null;
+}
+
+export interface DockerContainer {
+  id: string;
+  name: string;
+  image: string;
+  status: string;
+  state: string;
+  ports: string;
+}
+
+export interface DockerOverview {
+  available: boolean;
+  containers: DockerContainer[];
+  reclaimable_summary: string;
+  error: string | null;
+}
+
+export interface EnvHygieneItem {
+  project_name: string;
+  project_path: string;
+  has_env: boolean;
+  gitignored: boolean;
+  exposed_risk: boolean;
+  key_count: number;
+  key_names: string[];
+}
+
+export interface FocusModeResult {
+  mode: string;
+  summary: string;
+  freed_memory_bytes: number;
+  killed_pids: number[];
+  notes: string[];
+}
+
 export const api = {
   appVersion(): Promise<string> {
     return invoke<string>("app_version");
@@ -197,5 +359,94 @@ export const api = {
 
   saveSettings(params: { settings: Record<string, string> }): Promise<void> {
     return invoke<void>("save_settings", { settings: params.settings });
+  },
+
+  checkGitProviders(): Promise<GitProviderStatus> {
+    return invoke<GitProviderStatus>("check_git_providers");
+  },
+
+  listRemoteRepos(provider: "github" | "gitlab"): Promise<RemoteRepo[]> {
+    return invoke<RemoteRepo[]>("list_remote_repos", { provider });
+  },
+
+  cloneRepo(args: {
+    cloneUrl: string;
+    targetWorkspaceDir: string;
+    folderName?: string | null;
+  }): Promise<string> {
+    return invoke<string>("clone_repo", args);
+  },
+
+  createLocalProject(args: {
+    workspaceDir: string;
+    name: string;
+    template: "empty" | "react-vite" | "rust" | "python";
+    createGithubRemote: boolean;
+    private: boolean;
+  }): Promise<string> {
+    return invoke<string>("create_local_project", args);
+  },
+
+  fetchSocialSnapshot(): Promise<SocialBridgeSnapshot> {
+    return invoke<SocialBridgeSnapshot>("fetch_social_snapshot");
+  },
+
+  inspectKnowledgeHub(): Promise<KnowledgeOverview> {
+    return invoke<KnowledgeOverview>("inspect_knowledge_hub");
+  },
+
+  searchKnowledgeHub(
+    query: string,
+    limit?: number
+  ): Promise<KnowledgeSearchHit[]> {
+    return invoke<KnowledgeSearchHit[]>("search_knowledge_hub", {
+      query,
+      limit: limit ?? 20,
+    });
+  },
+
+  checkAiStatus(): Promise<AiStatus> {
+    return invoke<AiStatus>("check_ai_status");
+  },
+
+  aiChat(messages: CopilotMessage[]): Promise<CopilotReply> {
+    return invoke<CopilotReply>("ai_chat", { messages });
+  },
+
+  scanCreativeCaches(): Promise<CreativeCacheItem[]> {
+    return invoke<CreativeCacheItem[]>("scan_creative_caches");
+  },
+
+  inspectMediaFile(path: string): Promise<MediaProbeResult> {
+    return invoke<MediaProbeResult>("inspect_media_file", { path });
+  },
+
+  pickMediaFile(): Promise<string | null> {
+    return invoke<string | null>("pick_media_file");
+  },
+
+  scanLocalAiModels(): Promise<LocalAiModel[]> {
+    return invoke<LocalAiModel[]>("scan_local_ai_models");
+  },
+
+  inspectDocker(): Promise<DockerOverview> {
+    return invoke<DockerOverview>("inspect_docker");
+  },
+
+  dockerContainerAction(
+    id: string,
+    action: "start" | "stop" | "restart"
+  ): Promise<void> {
+    return invoke<void>("docker_container_action", { id, action });
+  },
+
+  scanEnvHygiene(): Promise<EnvHygieneItem[]> {
+    return invoke<EnvHygieneItem[]>("scan_env_hygiene");
+  },
+
+  activateFocusMode(
+    mode: "render" | "webdev" | "publish"
+  ): Promise<FocusModeResult> {
+    return invoke<FocusModeResult>("activate_focus_mode", { mode });
   },
 };

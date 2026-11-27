@@ -9,11 +9,13 @@ import {
   HardDrive,
   MemoryStick,
   RefreshCw,
+  Share2,
   Trash2,
   Zap,
 } from "lucide-react";
 import type {
   DevProcessReport,
+  SocialBridgeSnapshot,
   SystemMetrics,
   UptimeResult,
   WorkspaceRecord,
@@ -27,7 +29,14 @@ import {
 } from "../lib/format";
 import { resolveProcessOwner } from "./ProcessesView";
 
-export type NavTab = "overview" | "processes" | "projects" | "settings";
+export type NavTab =
+  | "overview"
+  | "processes"
+  | "projects"
+  | "git"
+  | "knowledge"
+  | "studio"
+  | "settings";
 export type ProcessFilter =
   | "all"
   | "zombie"
@@ -44,6 +53,10 @@ export interface OverviewViewProps {
   workspaces: WorkspaceRecord[];
   scanReport: WorkspaceScanReport | null;
   uptimeMap: Record<string, UptimeResult>;
+  socialSnapshot?: SocialBridgeSnapshot | null;
+  showSocialCard?: boolean;
+  loadingSocial?: boolean;
+  onRefreshSocial?: () => void;
   loading: boolean;
   onRefresh: () => void;
   onAddWorkspace: () => void;
@@ -83,6 +96,10 @@ export function OverviewView({
   workspaces,
   scanReport,
   uptimeMap,
+  socialSnapshot,
+  showSocialCard = false,
+  loadingSocial = false,
+  onRefreshSocial,
   loading,
   onRefresh,
   onAddWorkspace,
@@ -353,6 +370,105 @@ export function OverviewView({
             <FolderPlus size={16} />
             <span>+ İş Klasörünü Seç</span>
           </button>
+        </section>
+      )}
+
+      {/* Canlı Sosyal Merkez MCP Köprüsü Kartı */}
+      {showSocialCard && (
+        <section
+          className="panel social-bridge-card"
+          aria-label="Sosyal Merkez MCP Köprüsü"
+        >
+          <div className="panel__head">
+            <div className="social-bridge-card__title">
+              <h2 className="panel__title">
+                <Share2 size={16} className="text-cyan" /> Sosyal Merkez MCP
+                Köprüsü
+              </h2>
+              <span
+                className={`badge ${
+                  socialSnapshot?.connected ? "badge--success" : "badge--warning"
+                }`}
+              >
+                {socialSnapshot?.connected ? "Bağlı" : "Çevrimdışı"}
+              </span>
+              {socialSnapshot?.app_version && (
+                <span className="mono muted">v{socialSnapshot.app_version}</span>
+              )}
+            </div>
+            <div className="header-actions">
+              {socialSnapshot?.endpoint && (
+                <span className="mono muted truncate">
+                  {socialSnapshot.endpoint}
+                </span>
+              )}
+              {onRefreshSocial && (
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={onRefreshSocial}
+                  disabled={loadingSocial}
+                >
+                  <RefreshCw
+                    size={13}
+                    className={loadingSocial ? "spin" : ""}
+                  />
+                  <span>Güncelle</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {socialSnapshot?.connected ? (
+            <>
+              <div className="social-stats-grid">
+                <div className="social-stat">
+                  <span className="social-stat__label">Yayınlanan</span>
+                  <strong className="social-stat__value text-emerald tabular">
+                    {socialSnapshot.published_count}
+                  </strong>
+                </div>
+                <div className="social-stat">
+                  <span className="social-stat__label">Planlı</span>
+                  <strong className="social-stat__value text-cyan tabular">
+                    {socialSnapshot.scheduled_count}
+                  </strong>
+                </div>
+                <div className="social-stat">
+                  <span className="social-stat__label">Onay Bekleyen</span>
+                  <strong className="social-stat__value text-warning tabular">
+                    {socialSnapshot.pending_review_count}
+                  </strong>
+                </div>
+                <div className="social-stat">
+                  <span className="social-stat__label">Hatalı</span>
+                  <strong className="social-stat__value tabular">
+                    {socialSnapshot.failed_count}
+                  </strong>
+                </div>
+              </div>
+
+              {socialSnapshot.accounts.length > 0 && (
+                <div className="social-accounts-row">
+                  {socialSnapshot.accounts.map((acc) => (
+                    <span
+                      key={acc.id}
+                      className="badge badge--neutral"
+                      title={`${acc.platform} · ${acc.status}`}
+                    >
+                      <strong>{acc.platform}</strong>
+                      <span>{acc.display_name}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="empty-hint">
+              {socialSnapshot?.error ||
+                "Sosyal Merkez MCP sunucusuna şu an ulaşılamıyor. Ayarlardan endpoint ve token yolunu kontrol edebilirsiniz."}
+            </p>
+          )}
         </section>
       )}
 

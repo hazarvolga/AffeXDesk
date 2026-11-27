@@ -408,6 +408,7 @@ export function SmartCleanerPanel({
       {/* Son Temizlik Raporu & Docker.raw Küçültme Aksiyonu */}
       {lastRun && (() => {
         const isAllFailed = lastRun.succeeded === 0 && lastRun.failed > 0;
+        const okResults = lastRun.results.filter((r) => r.ok);
         const failedResults = lastRun.results.filter((r) => !r.ok);
         return (
           <div
@@ -440,6 +441,19 @@ export function SmartCleanerPanel({
                       {lastRun.failed > 0 ? `, ${lastRun.failed} başarısız` : ""})
                     </span>
                   </>
+                )}
+                {okResults.length > 0 && (
+                  <ul className="cleaner-result-banner__items">
+                    {okResults.map((item) => (
+                      <li key={item.id}>
+                        <strong>{item.title}:</strong>{" "}
+                        <span className="tabular text-emerald">
+                          {formatBytes(item.freed_bytes)}
+                        </span>{" "}
+                        <span className="muted">— {item.message}</span>
+                      </li>
+                    ))}
+                  </ul>
                 )}
                 {failedResults.length > 0 && (
                   <ul className="cleaner-result-banner__errors">

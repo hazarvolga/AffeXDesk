@@ -350,9 +350,19 @@ export function ProjectsView({
                   <div className="cache-box">
                     <div className="cache-list">
                       {proj.reclaimable_dirs.map((dir) => (
-                        <span key={dir.path} className="cache-chip mono tabular">
-                          {dir.name} · {formatBytes(dir.size_bytes)}
-                        </span>
+                        <button
+                          key={dir.path}
+                          type="button"
+                          className="cache-chip cache-chip--clickable mono tabular"
+                          onClick={() => onOpenFinder(dir.path)}
+                          title={`Finder'da göster: ${dir.path}`}
+                          aria-label={`${dir.name} klasörünü aç`}
+                        >
+                          <FolderOpen size={11} />
+                          <span>
+                            {dir.name} · {formatBytes(dir.size_bytes)}
+                          </span>
+                        </button>
                       ))}
                     </div>
                     <button

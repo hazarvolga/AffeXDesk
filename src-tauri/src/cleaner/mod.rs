@@ -96,11 +96,63 @@ pub fn invalidate_cleaner_cache() {
 
 fn extended_path_env() -> String {
     let current = std::env::var("PATH").unwrap_or_default();
-    if cfg!(target_os = "macos") {
-        format!("/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{current}")
-    } else {
-        current
+    let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+    let mut extra: Vec<String> = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        let user_dirs: Vec<PathBuf> = if cfg!(target_os = "macos") {
+            vec![
+                home.join("Library/pnpm/bin"),
+                home.join("Library/pnpm"),
+                home.join(".local/bin"),
+                home.join(".cargo/bin"),
+                home.join(".volta/bin"),
+                home.join(".fnm/current/bin"),
+                home.join(".asdf/shims"),
+                home.join(".mise/shims"),
+            ]
+        } else if cfg!(target_os = "windows") {
+            vec![
+                home.join(".local/bin"),
+                home.join(".cargo/bin"),
+                home.join(".volta/bin"),
+            ]
+        } else {
+            vec![
+                home.join(".local/share/pnpm"),
+                home.join(".local/bin"),
+                home.join(".cargo/bin"),
+                home.join(".volta/bin"),
+                home.join(".fnm/current/bin"),
+                home.join(".asdf/shims"),
+                home.join(".mise/shims"),
+            ]
+        };
+        for d in user_dirs {
+            if let Some(s) = d.to_str() {
+                extra.push(s.to_string());
+            }
+        }
     }
+
+    if cfg!(target_os = "macos") {
+        extra.extend(
+            ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
+                .iter()
+                .map(|s| (*s).to_string()),
+        );
+    } else if !cfg!(target_os = "windows") {
+        extra.extend(
+            ["/usr/local/bin", "/usr/bin", "/bin"]
+                .iter()
+                .map(|s| (*s).to_string()),
+        );
+    }
+
+    if !current.is_empty() {
+        extra.push(current);
+    }
+    extra.join(sep)
 }
 
 fn run_cli_with_timeout(bin: &str, args: &[&str], timeout_secs: u64) -> Result<String, String> {
@@ -911,18 +963,18 @@ pub fn run_system_cleaner(item_ids: &[String]) -> Result<CleanerRunReport, Strin
                         title: "pnpm Paket Deposu".to_string(),
                         ok: true,
                         freed_bytes: freed,
-                        message: "pnpm store prune tamamlandı.".to_string(),
+                        message: if freed == 0 {
+                            "Sahipsiz pnpm paketi yok; kalan depo aktif projeler tarafından kullanılıyor.".to_string()
+                        } else {
+                            "pnpm store prune tamamlandı.".to_string()
+                        },
                     },
                     Err(e) => CleanerRunItemResult {
                         id: id.to_string(),
                         title: "pnpm Paket Deposu".to_string(),
-                        ok: freed > 0,
+                        ok: false,
                         freed_bytes: freed,
-                        message: if freed > 0 {
-                            "pnpm önbellek dizini temizlendi.".to_string()
-                        } else {
-                            e
-                        },
+                        message: format!("pnpm store prune çalıştırılamadı: {e}"),
                     },
                 }
             }
@@ -979,7 +1031,7 @@ pub fn run_system_cleaner(item_ids: &[String]) -> Result<CleanerRunReport, Strin
             "homebrew_cache" => {
                 let dir = home.join("Library/Caches/Homebrew");
                 let before = measure_dir_fast(&dir);
-                let res = run_cli("brew", &["cleanup", "-s"])
+                let res = run_cli("brew", &["cleanup", "--prune=all", "-s"])
                     .or_else(|_| clear_directory_contents(&dir).map(|_| String::new()));
                 let after = measure_dir_fast(&dir);
                 let freed = before.saturating_sub(after);
@@ -989,7 +1041,7 @@ pub fn run_system_cleaner(item_ids: &[String]) -> Result<CleanerRunReport, Strin
                     ok: res.is_ok(),
                     freed_bytes: freed,
                     message: res
-                        .map(|_| "Homebrew önbelleği temizlendi.".to_string())
+                        .map(|_| "Homebrew önbelleği (--prune=all) temizlendi.".to_string())
                         .unwrap_or_else(|e| e),
                 }
             }

@@ -110,6 +110,10 @@ describe("ProjectsView", () => {
       );
     });
 
+    // Cache chip opens exact folder in Finder
+    fireEvent.click(screen.getByRole("button", { name: /node_modules klasörünü aç/i }));
+    expect(onOpenFinder).toHaveBeenCalledWith("/dev/mission-ui/node_modules");
+
     // Quick action buttons
     fireEvent.click(screen.getAllByRole("button", { name: /Finder/i })[0]);
     expect(onOpenFinder).toHaveBeenCalledWith("/dev/mission-ui");

@@ -1042,9 +1042,26 @@ button {
 .cache-chip {
   font-size: 11px;
   padding: 2px 7px;
-  border-radius: 5px;
+  border-radius: 3px;
   background: rgba(245, 158, 11, 0.12);
   color: #fde68a;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cache-chip--clickable {
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.cache-chip--clickable:hover,
+.cache-chip--clickable:focus-visible {
+  background: rgba(245, 158, 11, 0.22);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #fef3c7;
+  outline: none;
 }
 
 .project-card__footer {
@@ -2724,6 +2741,16 @@ button.telemetry-ribbon__item:hover {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.cleaner-result-banner__items {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .cleaner-result-banner__errors {

@@ -1070,23 +1070,61 @@ pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
     {
         use std::process::Command;
 
-        let output = Command::new("osascript")
-            .args([
-                "-e",
-                "on run argv",
-                "-e",
-                "tell application \"Finder\" to delete POSIX file (item 1 of argv)",
-                "-e",
-                "end run",
-                "--",
-            ])
-            .arg(&canonical)
-            .output()
-            .map_err(|err| format!("Finder Çöp Sepeti komutu çalıştırılamadı: {err}"))?;
+        // 1. Birincil: macOS yerleşik `/usr/bin/trash` (NSFileManager.trashItemAtURL kullanır;
+        //    Finder Apple Events otomasyon izni gerektirmez, gizli .cache klasörlerinde de çalışır).
+        let trash_bin = Path::new("/usr/bin/trash");
+        let mut trashed = false;
+        let mut last_err = String::new();
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(format!("Çöp Sepetine taşınamadı: {stderr}"));
+        if trash_bin.exists() {
+            match Command::new(trash_bin).arg(&canonical).output() {
+                Ok(output) if output.status.success() && !canonical.exists() => {
+                    trashed = true;
+                }
+                Ok(output) => {
+                    last_err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                }
+                Err(err) => {
+                    last_err = err.to_string();
+                }
+            }
+        }
+
+        // 2. Yedek (eski macOS veya /usr/bin/trash başarısız olursa): doğrudan ~/.Trash içine atomik taşıma
+        if !trashed {
+            if let Some(ref h) = home {
+                let trash_dir = h.join(".Trash");
+                if trash_dir.is_dir() {
+                    let base_name = canonical
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("trashed_item");
+                    let mut dest = trash_dir.join(base_name);
+                    if dest.exists() {
+                        let ts = chrono::Utc::now().timestamp_millis();
+                        dest = trash_dir.join(format!("{base_name}_{ts}"));
+                    }
+                    match fs::rename(&canonical, &dest) {
+                        Ok(()) => {
+                            trashed = true;
+                        }
+                        Err(err) => {
+                            last_err = format!("{last_err} | ~/.Trash taşıma hatası: {err}");
+                        }
+                    }
+                }
+            }
+        }
+
+        if !trashed || canonical.exists() {
+            return Err(format!(
+                "Çöp Sepetine taşınamadı: {}",
+                if last_err.is_empty() {
+                    "Bilinmeyen hata (Tam Disk Erişimi gerekebilir)".to_string()
+                } else {
+                    last_err
+                }
+            ));
         }
     }
 

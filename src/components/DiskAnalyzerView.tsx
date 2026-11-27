@@ -506,6 +506,7 @@ export function DiskAnalyzerView({
       clearDiskAnalyzerCache();
       await Promise.all([
         loadDirectory(currentDir, { force: true }),
+        loadAiModels(true),
         onRefreshTelemetry(),
       ]);
     } catch (err) {
@@ -522,7 +523,14 @@ export function DiskAnalyzerView({
     } finally {
       setTrashing(false);
     }
-  }, [trashTarget, currentDir, loadDirectory, onRefreshTelemetry, onNotify]);
+  }, [
+    trashTarget,
+    currentDir,
+    loadDirectory,
+    loadAiModels,
+    onRefreshTelemetry,
+    onNotify,
+  ]);
 
   const diskUsedPct = useMemo(() => {
     if (!report || report.disk_total_bytes <= 0) return 0;

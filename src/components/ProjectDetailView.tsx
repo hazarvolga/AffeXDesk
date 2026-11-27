@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -9,16 +9,22 @@ import {
   GitBranch,
   GitCommitHorizontal,
   Monitor,
+  Plus,
   RefreshCw,
+  RotateCcw,
   ShieldAlert,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Wrench,
+  X,
 } from "lucide-react";
 import {
   api,
   type ClientRecord,
+  type CustomDevOpsRule,
+  type DevOpsRulesConfig,
   type ProjectAuditReport,
   type ProjectInfo,
   type UptimeResult,
@@ -39,6 +45,21 @@ export interface ProjectDetailViewProps {
 }
 
 type RuleFilter = "all" | "issues" | "security" | "git_deploy";
+
+const BUILTIN_RULE_META: Array<{ id: string; title: string; category: string }> = [
+  { id: "git_initialized", title: "Git Sürüm Kontrolü", category: "Git" },
+  { id: "git_remote_linked", title: "Uzak Depo (GitHub / GitLab)", category: "Git" },
+  { id: "git_working_tree_clean", title: "Temiz Çalışma Ağacı", category: "Git" },
+  { id: "gitignore_present", title: ".gitignore Yapılandırması", category: "Güvenlik" },
+  { id: "env_security", title: ".env Gizlilik Koruması", category: "Güvenlik" },
+  { id: "env_example_present", title: ".env.example Şablonu", category: "Güvenlik" },
+  { id: "ci_pipeline_present", title: "CI/CD Otomasyon Hattı", category: "CI / Yayın" },
+  { id: "deploy_config_present", title: "Dağıtım / Paketleme Yapılandırması", category: "CI / Yayın" },
+  { id: "readme_present", title: "README Dokümantasyonu", category: "Dokümantasyon" },
+  { id: "license_present", title: "Lisans Dosyası", category: "Dokümantasyon" },
+  { id: "handoff_or_spec", title: "Devir / Teknik Tasarım Notu", category: "Dokümantasyon" },
+  { id: "test_and_build_scripts", title: "Test & Derleme Altyapısı", category: "Kalite & Test" },
+];
 
 const FIX_LABELS: Record<string, string> = {
   create_gitignore: ".gitignore Oluştur",
@@ -68,6 +89,22 @@ export function ProjectDetailView({
   onNotify,
 }: ProjectDetailViewProps) {
   const [audit, setAudit] = useState<ProjectAuditReport | null>(null);
+  const [rulesConfig, setRulesConfig] = useState<DevOpsRulesConfig>({
+    disabled_builtin_ids: [],
+    custom_rules: [],
+  });
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  // New custom rule draft
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftCategory, setDraftCategory] = useState("quality");
+  const [draftCheckType, setDraftCheckType] = useState("file_exists");
+  const [draftTargetPath, setDraftTargetPath] = useState("");
+  const [draftPattern, setDraftPattern] = useState("");
+  const [draftSeverity, setDraftSeverity] = useState("warn");
+  const [draftWeight, setDraftWeight] = useState(6);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ruleFilter, setRuleFilter] = useState<RuleFilter>("all");
@@ -77,8 +114,12 @@ export function ProjectDetailView({
     setLoading(true);
     setError(null);
     try {
-      const rep = await api.auditProjectRules(project.path);
+      const [rep, cfg] = await Promise.all([
+        api.auditProjectRules(project.path),
+        api.getDevOpsRulesConfig(),
+      ]);
       setAudit(rep);
+      setRulesConfig(cfg);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -89,6 +130,93 @@ export function ProjectDetailView({
   useEffect(() => {
     void runAudit();
   }, [runAudit]);
+
+  const persistConfig = async (next: DevOpsRulesConfig, toastText?: string) => {
+    setSavingConfig(true);
+    try {
+      const saved = await api.saveDevOpsRulesConfig(next);
+      setRulesConfig(saved);
+      const rep = await api.auditProjectRules(project.path);
+      setAudit(rep);
+      if (toastText) onNotify?.("success", toastText);
+    } catch (err) {
+      onNotify?.("error", `Kural ayarları kaydedilemedi: ${String(err)}`);
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  const handleToggleBuiltin = (ruleId: string) => {
+    const isDisabled = rulesConfig.disabled_builtin_ids.includes(ruleId);
+    const nextDisabled = isDisabled
+      ? rulesConfig.disabled_builtin_ids.filter((id) => id !== ruleId)
+      : [...rulesConfig.disabled_builtin_ids, ruleId];
+    void persistConfig({
+      ...rulesConfig,
+      disabled_builtin_ids: nextDisabled,
+    });
+  };
+
+  const handleAddCustomRule = (e: FormEvent) => {
+    e.preventDefault();
+    const title = draftTitle.trim();
+    const targetPath = draftTargetPath.trim();
+    if (!title || !targetPath) {
+      onNotify?.("error", "Kural başlığı ve hedef dosya yolu zorunludur.");
+      return;
+    }
+    if (draftCheckType === "file_contains" && !draftPattern.trim()) {
+      onNotify?.("error", "'Dosya İçermeli' kuralı için aranacak metin girin.");
+      return;
+    }
+    const newRule: CustomDevOpsRule = {
+      id: `custom_${Date.now()}`,
+      title,
+      category: draftCategory,
+      check_type: draftCheckType,
+      target_path: targetPath,
+      pattern: draftCheckType === "file_contains" ? draftPattern.trim() : null,
+      severity: draftSeverity,
+      weight: Math.max(1, Math.min(20, Number(draftWeight) || 6)),
+      enabled: true,
+    };
+    setDraftTitle("");
+    setDraftTargetPath("");
+    setDraftPattern("");
+    void persistConfig(
+      {
+        ...rulesConfig,
+        custom_rules: [...rulesConfig.custom_rules, newRule],
+      },
+      `Özel kural eklendi: ${title}`
+    );
+  };
+
+  const handleToggleCustom = (id: string) => {
+    void persistConfig({
+      ...rulesConfig,
+      custom_rules: rulesConfig.custom_rules.map((r) =>
+        r.id === id ? { ...r, enabled: !r.enabled } : r
+      ),
+    });
+  };
+
+  const handleDeleteCustom = (id: string) => {
+    void persistConfig(
+      {
+        ...rulesConfig,
+        custom_rules: rulesConfig.custom_rules.filter((r) => r.id !== id),
+      },
+      "Özel kural kaldırıldı."
+    );
+  };
+
+  const handleResetDefaults = () => {
+    void persistConfig(
+      { disabled_builtin_ids: [], custom_rules: [] },
+      "DevOps kural kütüphanesi varsayılanlara sıfırlandı."
+    );
+  };
 
   const handleApplyFix = async (ruleId: string, fixAction: string) => {
     setFixingId(ruleId);
@@ -213,7 +341,7 @@ export function ProjectDetailView({
           <p className="metric-card__meta tabular">
             {audit
               ? `${audit.passed_count} geçti · ${audit.warn_count} uyarı · ${audit.fail_count} kritik`
-              : "12 DevOps / WebDev kuralı kontrol ediliyor"}
+              : "DevOps / WebDev kuralları kontrol ediliyor"}
           </p>
         </article>
 
@@ -320,33 +448,194 @@ export function ProjectDetailView({
               <Wrench size={15} className="text-cyan" /> DevOps & WebDev Kural Kütüphanesi
             </h2>
             <p className="view-subtitle">
-              GitHub, GitLab, Vercel, Docker ve güvenlik standartlarına göre canlı proje denetimi. Eksik şablonları tek tıkla güvenle oluşturabilirsiniz (mevcut dosyalar asla ezilmez).
+              Çalışma disiplininize göre yerleşik kuralları açıp kapatabilir veya kendi özel kurallarınızı ekleyebilirsiniz.
             </p>
           </div>
-          <div className="filter-pills" role="tablist">
-            {(
-              [
-                ["all", `Tümü (${audit?.rules.length ?? 0})`],
-                [
-                  "issues",
-                  `Eksikler (${(audit?.warn_count ?? 0) + (audit?.fail_count ?? 0)})`,
-                ],
-                ["security", "Güvenlik"],
-                ["git_deploy", "Git & CI"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={ruleFilter === id}
-                className={`pill ${ruleFilter === id ? "pill--active" : ""}`}
-                onClick={() => setRuleFilter(id)}
-              >
-                {label}
-              </button>
-            ))}
+          <div className="header-actions">
+            <button
+              type="button"
+              className={`btn btn--sm ${editorOpen ? "btn--primary" : "btn--secondary"}`}
+              onClick={() => setEditorOpen((prev) => !prev)}
+            >
+              <SlidersHorizontal size={13} />
+              <span>{editorOpen ? "Düzenlemeyi Kapat" : "Kuralları Düzenle"}</span>
+            </button>
           </div>
+        </div>
+
+        {/* Özelleştirilebilir Kural Düzenleyici Paneli */}
+        {editorOpen && (
+          <div className="rule-editor-box">
+            <div className="rule-editor-box__head">
+              <strong>Yerleşik Kurallar (Aç / Kapa)</strong>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={savingConfig}
+                onClick={handleResetDefaults}
+              >
+                <RotateCcw size={12} />
+                <span>Varsayılanlara Sıfırla</span>
+              </button>
+            </div>
+
+            <div className="rule-toggle-grid">
+              {BUILTIN_RULE_META.map((item) => {
+                const enabled = !rulesConfig.disabled_builtin_ids.includes(item.id);
+                return (
+                  <label
+                    key={item.id}
+                    className={`rule-toggle-chip ${
+                      enabled ? "rule-toggle-chip--on" : "rule-toggle-chip--off"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      disabled={savingConfig}
+                      onChange={() => handleToggleBuiltin(item.id)}
+                    />
+                    <span>{item.title}</span>
+                    <span className="muted" style={{ fontSize: 10 }}>
+                      {item.category}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="rule-editor-box__head" style={{ marginTop: 14 }}>
+              <strong>Özel Kural Ekle ({rulesConfig.custom_rules.length} tanımlı)</strong>
+            </div>
+
+            <form className="custom-rule-form" onSubmit={handleAddCustomRule}>
+              <input
+                type="text"
+                placeholder="Kural başlığı (ör. TypeScript Strict Mod)"
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+              />
+              <select
+                value={draftCategory}
+                onChange={(e) => setDraftCategory(e.target.value)}
+                aria-label="Kural kategorisi"
+              >
+                <option value="quality">Kalite & Test</option>
+                <option value="security">Güvenlik</option>
+                <option value="deploy">CI / Yayın</option>
+                <option value="git">Git</option>
+                <option value="docs">Dokümantasyon</option>
+              </select>
+              <select
+                value={draftCheckType}
+                onChange={(e) => setDraftCheckType(e.target.value)}
+                aria-label="Kontrol tipi"
+              >
+                <option value="file_exists">Dosya Olmalı</option>
+                <option value="file_contains">Dosya İçermeli</option>
+                <option value="file_absent">Dosya Olmamalı</option>
+              </select>
+              <input
+                type="text"
+                className="mono"
+                placeholder="Göreli dosya (ör. vercel.json)"
+                value={draftTargetPath}
+                onChange={(e) => setDraftTargetPath(e.target.value)}
+              />
+              {draftCheckType === "file_contains" && (
+                <input
+                  type="text"
+                  className="mono"
+                  placeholder='Aranacak metin (ör. "strict": true)'
+                  value={draftPattern}
+                  onChange={(e) => setDraftPattern(e.target.value)}
+                />
+              )}
+              <select
+                value={draftSeverity}
+                onChange={(e) => setDraftSeverity(e.target.value)}
+                aria-label="Önem derecesi"
+              >
+                <option value="warn">Öneri (Uyarı)</option>
+                <option value="fail">Kritik (Hata)</option>
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={draftWeight}
+                onChange={(e) => setDraftWeight(Number(e.target.value))}
+                title="Puan ağırlığı (1-20)"
+                style={{ width: 64 }}
+              />
+              <button
+                type="submit"
+                className="btn btn--primary btn--sm"
+                disabled={savingConfig}
+              >
+                <Plus size={13} />
+                <span>Ekle</span>
+              </button>
+            </form>
+
+            {rulesConfig.custom_rules.length > 0 && (
+              <div className="custom-rule-list">
+                {rulesConfig.custom_rules.map((r) => (
+                  <div key={r.id} className="custom-rule-item">
+                    <label className="custom-rule-item__check">
+                      <input
+                        type="checkbox"
+                        checked={r.enabled}
+                        disabled={savingConfig}
+                        onChange={() => handleToggleCustom(r.id)}
+                      />
+                      <strong>{r.title}</strong>
+                      <span className="badge badge--neutral mono">{r.check_type}</span>
+                      <span className="mono muted">{r.target_path}</span>
+                      {r.pattern && (
+                        <span className="mono text-cyan">contains "{r.pattern}"</span>
+                      )}
+                      <span className="badge badge--info tabular">{r.weight}p</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-label="Özel kuralı sil"
+                      disabled={savingConfig}
+                      onClick={() => handleDeleteCustom(r.id)}
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="filter-pills" role="tablist" style={{ marginBottom: 10 }}>
+          {(
+            [
+              ["all", `Tümü (${audit?.rules.length ?? 0})`],
+              [
+                "issues",
+                `Eksikler (${(audit?.warn_count ?? 0) + (audit?.fail_count ?? 0)})`,
+              ],
+              ["security", "Güvenlik"],
+              ["git_deploy", "Git & CI"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={ruleFilter === id}
+              className={`pill ${ruleFilter === id ? "pill--active" : ""}`}
+              onClick={() => setRuleFilter(id)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         <div className="rule-list">
@@ -354,10 +643,7 @@ export function ProjectDetailView({
             const isPass = rule.status === "pass";
             const isFail = rule.status === "fail";
             return (
-              <div
-                key={rule.id}
-                className={`rule-row rule-row--${rule.status}`}
-              >
+              <div key={rule.id} className={`rule-row rule-row--${rule.status}`}>
                 <div className="rule-row__icon">
                   {isPass ? (
                     <CheckCircle2 size={16} className="text-emerald" />
@@ -373,6 +659,9 @@ export function ProjectDetailView({
                     <span className="badge badge--neutral">
                       {CATEGORY_LABELS[rule.category] ?? rule.category}
                     </span>
+                    {rule.is_custom && (
+                      <span className="badge badge--info">Özel Kural</span>
+                    )}
                   </div>
                   <p className="rule-row__detail">{rule.detail}</p>
                 </div>

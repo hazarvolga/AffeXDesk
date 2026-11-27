@@ -774,13 +774,54 @@ pub fn focus_main_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+const DEVOPS_RULES_SETTING_KEY: &str = "devops_rules_config_json";
+
+#[tauri::command]
+pub fn get_devops_rules_config(
+    state: State<'_, AppState>,
+) -> Result<workspace::audit::DevOpsRulesConfig, String> {
+    let raw = state
+        .db
+        .get_setting(DEVOPS_RULES_SETTING_KEY)
+        .map_err(|err| format!("failed to read devops rules config: {err}"))?;
+    match raw {
+        Some(json) if !json.trim().is_empty() => serde_json::from_str(&json)
+            .map_err(|err| format!("invalid devops rules config json: {err}")),
+        _ => Ok(workspace::audit::DevOpsRulesConfig::default()),
+    }
+}
+
+#[tauri::command]
+pub fn save_devops_rules_config(
+    state: State<'_, AppState>,
+    config: workspace::audit::DevOpsRulesConfig,
+) -> Result<workspace::audit::DevOpsRulesConfig, String> {
+    let json = serde_json::to_string(&config)
+        .map_err(|err| format!("failed to serialize devops rules config: {err}"))?;
+    state
+        .db
+        .set_setting(DEVOPS_RULES_SETTING_KEY, &json)
+        .map_err(|err| format!("failed to save devops rules config: {err}"))?;
+    Ok(config)
+}
+
 #[tauri::command]
 pub async fn audit_project_rules(
+    state: State<'_, AppState>,
     project_path: String,
 ) -> Result<workspace::audit::ProjectAuditReport, String> {
-    tokio::task::spawn_blocking(move || workspace::audit::audit_project(&project_path))
-        .await
-        .map_err(|err| format!("project audit task failed: {err}"))?
+    let config = state
+        .db
+        .get_setting(DEVOPS_RULES_SETTING_KEY)
+        .ok()
+        .flatten()
+        .and_then(|json| serde_json::from_str::<workspace::audit::DevOpsRulesConfig>(&json).ok())
+        .unwrap_or_default();
+    tokio::task::spawn_blocking(move || {
+        workspace::audit::audit_project_with_config(&project_path, &config)
+    })
+    .await
+    .map_err(|err| format!("project audit task failed: {err}"))?
 }
 
 #[tauri::command]

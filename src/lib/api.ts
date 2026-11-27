@@ -435,6 +435,24 @@ export interface DevOpsRuleResult {
   status: "pass" | "warn" | "fail" | string;
   detail: string;
   fix_action: string | null;
+  is_custom?: boolean;
+}
+
+export interface CustomDevOpsRule {
+  id: string;
+  title: string;
+  category: "git" | "security" | "deploy" | "docs" | "quality" | string;
+  check_type: "file_exists" | "file_contains" | "file_absent" | string;
+  target_path: string;
+  pattern: string | null;
+  severity: "warn" | "fail" | string;
+  weight: number;
+  enabled: boolean;
+}
+
+export interface DevOpsRulesConfig {
+  disabled_builtin_ids: string[];
+  custom_rules: CustomDevOpsRule[];
 }
 
 export interface ProjectAuditReport {
@@ -740,5 +758,13 @@ export const api = {
 
   applyProjectRuleFix(projectPath: string, fixAction: string): Promise<string> {
     return invoke<string>("apply_project_rule_fix", { projectPath, fixAction });
+  },
+
+  getDevOpsRulesConfig(): Promise<DevOpsRulesConfig> {
+    return invoke<DevOpsRulesConfig>("get_devops_rules_config");
+  },
+
+  saveDevOpsRulesConfig(config: DevOpsRulesConfig): Promise<DevOpsRulesConfig> {
+    return invoke<DevOpsRulesConfig>("save_devops_rules_config", { config });
   },
 };

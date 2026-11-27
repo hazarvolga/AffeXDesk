@@ -95,6 +95,8 @@ pub fn run() {
             commands::focus_main_window,
             commands::audit_project_rules,
             commands::apply_project_rule_fix,
+            commands::get_devops_rules_config,
+            commands::save_devops_rules_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AffeXDesk");

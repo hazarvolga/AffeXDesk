@@ -2807,6 +2807,14 @@ button.telemetry-ribbon__item:hover {
   height: 100%;
 }
 
+.boot-splash__matrix {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.54;
+}
+
 .boot-splash__scanlines {
   position: absolute;
   inset: 0;

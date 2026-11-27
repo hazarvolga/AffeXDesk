@@ -104,6 +104,7 @@ export function BootSplash({
 }: BootSplashProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const matrixRef = useRef<HTMLCanvasElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
   const leftWingRef = useRef<HTMLDivElement | null>(null);
   const rightWingRef = useRef<HTMLDivElement | null>(null);
@@ -111,6 +112,16 @@ export function BootSplash({
   const shutterTopRef = useRef<HTMLDivElement | null>(null);
   const shutterBotRef = useRef<HTMLDivElement | null>(null);
   const barFillRef = useRef<HTMLSpanElement | null>(null);
+
+  // Live ref of real project & client names for the background Matrix Rain
+  const matrixTokensRef = useRef<string[]>([
+    "AFFEXDESK",
+    "TELEMETRY",
+    "WORKSPACES",
+    "GIT-GRAPH",
+    "DOCKER-RAW",
+    "NVME-SCAN",
+  ]);
 
   const [displayTitle, setDisplayTitle] = useState("0xAF/E9-X");
   const [percent, setPercent] = useState(0);
@@ -155,6 +166,150 @@ export function BootSplash({
     () => projects.filter((p) => p.git_dirty_count > 0).length,
     [projects]
   );
+
+  // Update Matrix Rain stream tokens immediately whenever real projects/clients arrive
+  useEffect(() => {
+    const tokens: string[] = [];
+    for (const p of projects) {
+      if (p.name) tokens.push(p.name.toUpperCase());
+      if (p.git_branch && p.git_branch !== "main") {
+        tokens.push(`${p.name.toUpperCase()}@${p.git_branch.toUpperCase()}`);
+      }
+    }
+    for (const c of clients) {
+      if (c.name) tokens.push(`CLIENT:${c.name.toUpperCase()}`);
+    }
+    if (tokens.length > 0) {
+      matrixTokensRef.current = tokens;
+    }
+  }, [projects, clients]);
+
+  // Real-Data Project Name Matrix Rain (transparent Canvas 2D over WebGL2 Lidar)
+  useEffect(() => {
+    const canvas = matrixRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let rafId = 0;
+    let width = window.innerWidth || 1280;
+    let height = window.innerHeight || 800;
+    const colWidth = 24;
+    const charStep = 16;
+
+    interface MatrixColumn {
+      x: number;
+      y: number;
+      speed: number;
+      text: string;
+      charIdx: number;
+      accent: "emerald" | "cyan";
+    }
+
+    let columns: MatrixColumn[] = [];
+
+    const pickToken = () => {
+      const list = matrixTokensRef.current;
+      const base = list[Math.floor(Math.random() * list.length)] || "AFFEXDESK";
+      return `${base} · `;
+    };
+
+    const initColumns = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      width = window.innerWidth || 1280;
+      height = window.innerHeight || 800;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const count = Math.max(12, Math.floor(width / colWidth));
+      columns = Array.from({ length: count }, (_, i) => ({
+        x: i * colWidth + 10,
+        y: Math.random() * height - height * 0.4,
+        speed: 44 + Math.random() * 68,
+        text: pickToken(),
+        charIdx: Math.floor(Math.random() * 8),
+        accent: i % 3 === 0 ? "cyan" : "emerald",
+      }));
+    };
+
+    initColumns();
+    window.addEventListener("resize", initColumns);
+
+    let lastTime = performance.now();
+    let stepAccum = 0;
+
+    const drawMatrix = (now: number) => {
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+      stepAccum += dt;
+
+      // Gently fade existing trails using destination-out so the WebGL2 Lidar stays transparent behind it
+      if (stepAccum >= 0.045) {
+        stepAccum = 0;
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+      }
+
+      ctx.font = '600 12px ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      for (const col of columns) {
+        const prevRow = Math.floor(col.y / charStep);
+        col.y += col.speed * dt;
+        const currRow = Math.floor(col.y / charStep);
+
+        if (currRow > prevRow) {
+          if (col.charIdx >= col.text.length) {
+            col.text = pickToken();
+            col.charIdx = 0;
+          }
+          const ch = col.text[col.charIdx] || "·";
+          col.charIdx += 1;
+
+          const drawY = currRow * charStep;
+          if (drawY >= 36 && drawY <= height - 36) {
+            // Paint previous head in emerald/cyan so only the newest tip glows ice-white
+            if (prevRow * charStep >= 36) {
+              const prevCh = col.text[Math.max(0, col.charIdx - 2)] || "";
+              if (prevCh) {
+                ctx.fillStyle =
+                  col.accent === "cyan"
+                    ? "rgba(56, 189, 248, 0.62)"
+                    : "rgba(16, 185, 129, 0.68)";
+                ctx.fillText(prevCh, col.x, prevRow * charStep);
+              }
+            }
+
+            // Bright leading head character
+            ctx.fillStyle = "rgba(224, 242, 254, 0.92)";
+            ctx.fillText(ch, col.x, drawY);
+          }
+        }
+
+        if (col.y > height + 40) {
+          col.y = -Math.random() * 160;
+          col.speed = 44 + Math.random() * 68;
+          col.text = pickToken();
+          col.charIdx = 0;
+        }
+      }
+
+      rafId = window.requestAnimationFrame(drawMatrix);
+    };
+
+    rafId = window.requestAnimationFrame(drawMatrix);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", initColumns);
+    };
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -573,6 +728,7 @@ export function BootSplash({
       title="Geçmek için tıklayın"
     >
       <div ref={mountRef} className="boot-splash__webgl" aria-hidden="true" />
+      <canvas ref={matrixRef} className="boot-splash__matrix" aria-hidden="true" />
       <div className="boot-splash__scanlines" aria-hidden="true" />
       <div className="boot-splash__vignette" aria-hidden="true" />
 

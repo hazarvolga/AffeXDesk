@@ -209,13 +209,26 @@ pub fn open_url(url: String) -> Result<(), String> {
     opener::open_url(&url)
 }
 
+const SECRET_SETTING_KEYS: [&str; 2] = ["github_token", "gitlab_token"];
+const SECRET_MASK_SENTINEL: &str = "__CONFIGURED__";
+
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<HashMap<String, String>, String> {
     let pairs = state
         .db
         .list_settings()
         .map_err(|err| format!("failed to list settings: {err}"))?;
-    Ok(pairs.into_iter().collect())
+    let masked = pairs
+        .into_iter()
+        .map(|(k, v)| {
+            if SECRET_SETTING_KEYS.contains(&k.as_str()) && !v.trim().is_empty() {
+                (k, SECRET_MASK_SENTINEL.to_string())
+            } else {
+                (k, v)
+            }
+        })
+        .collect();
+    Ok(masked)
 }
 
 #[tauri::command]
@@ -226,6 +239,10 @@ pub fn save_settings(
     for (key, value) in settings {
         let trimmed_key = key.trim();
         if trimmed_key.is_empty() {
+            continue;
+        }
+        // Maskelenmiş sentinel geri gönderildiyse mevcut gerçek token'ı koru
+        if SECRET_SETTING_KEYS.contains(&trimmed_key) && value == SECRET_MASK_SENTINEL {
             continue;
         }
         state

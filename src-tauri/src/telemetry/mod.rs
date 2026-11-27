@@ -195,7 +195,13 @@ fn enrich_macos_hardware(
 }
 
 pub fn collect_system_metrics() -> SystemMetrics {
-    let mut sys = System::new_all();
+    use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind};
+
+    let mut sys = System::new_with_specifics(
+        RefreshKind::new()
+            .with_cpu(CpuRefreshKind::everything())
+            .with_memory(MemoryRefreshKind::everything()),
+    );
     sys.refresh_cpu_usage();
     std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL);
     sys.refresh_cpu_usage();

@@ -79,11 +79,22 @@ pub struct ClientProjectInput {
     pub notes: String,
 }
 
+pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
 
 impl Database {
+    fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
+        self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_LOCKED),
+                Some("database mutex poisoned".to_string()),
+            )
+        })
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path_ref = path.as_ref();
         if let Some(parent) = path_ref.parent() {
@@ -91,8 +102,30 @@ impl Database {
                 let _ = std::fs::create_dir_all(parent);
             }
         }
+
+        // Mevcut DB sürümü daha eskiyse migrasyon öncesi otomatik yedek al
+        let existed = path_ref.exists();
         let conn = Connection::open(path_ref)?;
-        Self::init(conn)
+        if existed {
+            let ver: i64 = conn
+                .query_row("PRAGMA user_version;", [], |row| row.get(0))
+                .unwrap_or(0);
+            if ver > 0 && ver < CURRENT_SCHEMA_VERSION {
+                let bak = path_ref.with_extension(format!("db.bak.v{ver}"));
+                let _ = std::fs::copy(path_ref, bak);
+            }
+        }
+
+        let db = Self::init(conn)?;
+
+        // Unix sistemlerde veritabanı dosyasını yalnızca kullanıcıya okunabilir/yazılabilir (0600) yap
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path_ref, std::fs::Permissions::from_mode(0o600));
+        }
+
+        Ok(db)
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -154,25 +187,32 @@ impl Database {
             ",
         )?;
 
+        conn.execute_batch(&format!("PRAGMA user_version = {CURRENT_SCHEMA_VERSION};"))?;
+
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
 
+    pub fn schema_version(&self) -> Result<i64> {
+        let conn = self.lock_conn()?;
+        conn.query_row("PRAGMA user_version;", [], |row| row.get(0))
+    }
+
     pub fn journal_mode(&self) -> Result<String> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row("PRAGMA journal_mode;", [], |row| row.get(0))
     }
 
     pub fn busy_timeout(&self) -> Result<i64> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row("PRAGMA busy_timeout;", [], |row| row.get(0))
     }
 
     // --- Workspaces CRUD ---
 
     pub fn add_workspace(&self, path: &str, label: &str) -> Result<Workspace> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let created_at = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO workspaces (path, label, created_at) VALUES (?1, ?2, ?3)",
@@ -188,7 +228,7 @@ impl Database {
     }
 
     pub fn list_workspaces(&self) -> Result<Vec<Workspace>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, path, label, created_at FROM workspaces ORDER BY id ASC",
         )?;
@@ -204,7 +244,7 @@ impl Database {
     }
 
     pub fn get_workspace(&self, id: i64) -> Result<Option<Workspace>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT id, path, label, created_at FROM workspaces WHERE id = ?1",
             params![id],
@@ -221,7 +261,7 @@ impl Database {
     }
 
     pub fn remove_workspace(&self, id: i64) -> Result<bool> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let affected = conn.execute("DELETE FROM workspaces WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
@@ -229,7 +269,7 @@ impl Database {
     // --- Project URLs CRUD ---
 
     pub fn set_project_url(&self, project_path: &str, url: &str) -> Result<ProjectUrl> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let updated_at = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO project_urls (project_path, url, updated_at)
@@ -247,7 +287,7 @@ impl Database {
     }
 
     pub fn get_project_url(&self, project_path: &str) -> Result<Option<ProjectUrl>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT project_path, url, updated_at FROM project_urls WHERE project_path = ?1",
             params![project_path],
@@ -263,7 +303,7 @@ impl Database {
     }
 
     pub fn list_project_urls(&self) -> Result<Vec<ProjectUrl>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT project_path, url, updated_at FROM project_urls ORDER BY project_path ASC",
         )?;
@@ -278,7 +318,7 @@ impl Database {
     }
 
     pub fn delete_project_url(&self, project_path: &str) -> Result<bool> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let affected = conn.execute(
             "DELETE FROM project_urls WHERE project_path = ?1",
             params![project_path],
@@ -289,7 +329,7 @@ impl Database {
     // --- Settings CRUD ---
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO settings (key, value)
              VALUES (?1, ?2)
@@ -300,7 +340,7 @@ impl Database {
     }
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             params![key],
@@ -310,14 +350,14 @@ impl Database {
     }
 
     pub fn list_settings(&self) -> Result<Vec<(String, String)>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare("SELECT key, value FROM settings ORDER BY key ASC")?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         rows.collect()
     }
 
     pub fn delete_setting(&self, key: &str) -> Result<bool> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let affected = conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
         Ok(affected > 0)
     }
@@ -325,7 +365,7 @@ impl Database {
     // --- Clients CRUD ---
 
     pub fn list_clients(&self) -> Result<Vec<ClientRecord>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, name, contact_name, contact_info, remote_tool, remote_id, os_info, notes, last_connected_at, created_at
              FROM clients
@@ -349,7 +389,7 @@ impl Database {
     }
 
     pub fn get_client(&self, id: i64) -> Result<Option<ClientRecord>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT id, name, contact_name, contact_info, remote_tool, remote_id, os_info, notes, last_connected_at, created_at
              FROM clients WHERE id = ?1",
@@ -373,7 +413,7 @@ impl Database {
     }
 
     pub fn save_client(&self, input: &ClientInput) -> Result<ClientRecord> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let now = Utc::now().to_rfc3339();
         let name = input.name.trim();
         let contact_name = input.contact_name.trim();
@@ -422,7 +462,7 @@ impl Database {
     }
 
     pub fn touch_client_connected(&self, id: i64) -> Result<Option<String>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let now = Utc::now().to_rfc3339();
         let affected = conn.execute(
             "UPDATE clients SET last_connected_at = ?1 WHERE id = ?2",
@@ -432,7 +472,7 @@ impl Database {
     }
 
     pub fn delete_client(&self, id: i64) -> Result<bool> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let affected = conn.execute("DELETE FROM clients WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
@@ -440,7 +480,7 @@ impl Database {
     // --- Client Projects CRUD ---
 
     pub fn list_client_projects(&self) -> Result<Vec<ClientProjectRecord>> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, client_id, title, status, priority, progress_pct, due_date, local_path, live_url, notes, updated_at
              FROM client_projects
@@ -465,7 +505,7 @@ impl Database {
     }
 
     pub fn save_client_project(&self, input: &ClientProjectInput) -> Result<ClientProjectRecord> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let now = Utc::now().to_rfc3339();
         let title = input.title.trim();
         let status = input.status.trim().to_ascii_lowercase();
@@ -539,7 +579,7 @@ impl Database {
     }
 
     pub fn delete_client_project(&self, id: i64) -> Result<bool> {
-        let conn = self.conn.lock().expect("database mutex poisoned");
+        let conn = self.lock_conn()?;
         let affected = conn.execute("DELETE FROM client_projects WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
@@ -554,6 +594,10 @@ mod tests {
     fn test_in_memory_pragmas() {
         let db = Database::open_in_memory().expect("open in-memory db");
         assert_eq!(db.busy_timeout().expect("read busy_timeout"), 5000);
+        assert_eq!(
+            db.schema_version().expect("read schema_version"),
+            CURRENT_SCHEMA_VERSION
+        );
         // SQLite reports "memory" for in-memory DBs even after PRAGMA journal_mode = WAL
         let mode = db.journal_mode().expect("read journal_mode");
         assert!(mode.eq_ignore_ascii_case("memory") || mode.eq_ignore_ascii_case("wal"));

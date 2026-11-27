@@ -103,25 +103,70 @@ fn extended_path_env() -> String {
     }
 }
 
-fn run_cli(bin: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(bin)
+fn run_cli_with_timeout(bin: &str, args: &[&str], timeout_secs: u64) -> Result<String, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let mut child = Command::new(bin)
         .args(args)
         .env("PATH", extended_path_env())
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|err| format!("{bin} çalıştırılamadı: {err}"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let detail = if !stderr.is_empty() { stderr } else { stdout };
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) => {
+                if started.elapsed() >= Duration::from_secs(timeout_secs) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "{bin} komutu {timeout_secs} sn içinde yanıt vermedi (zaman aşımı)."
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{bin} beklenirken hata oluştu: {err}"));
+            }
+        }
+    };
+
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_string(&mut stdout);
+    }
+    if let Some(mut err) = child.stderr.take() {
+        let _ = err.read_to_string(&mut stderr);
+    }
+
+    if !status.success() {
+        let err_trim = stderr.trim().to_string();
+        let out_trim = stdout.trim().to_string();
+        let detail = if !err_trim.is_empty() {
+            err_trim
+        } else {
+            out_trim
+        };
         return Err(if detail.is_empty() {
-            format!("{bin} hata koduyla sonlandı: {}", output.status)
+            format!("{bin} hata koduyla sonlandı: {status}")
         } else {
             detail
         });
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(stdout)
+}
+
+fn run_cli(bin: &str, args: &[&str]) -> Result<String, String> {
+    run_cli_with_timeout(bin, args, 90)
 }
 
 /// Parses human size strings from Docker CLI such as:
@@ -229,7 +274,7 @@ fn parse_docker_df_json_lines(stdout: &str) -> DockerDfSummary {
 }
 
 fn inspect_docker_df() -> DockerDfSummary {
-    match run_cli("docker", &["system", "df", "--format", "{{json .}}"]) {
+    match run_cli_with_timeout("docker", &["system", "df", "--format", "{{json .}}"], 15) {
         Ok(stdout) => parse_docker_df_json_lines(&stdout),
         Err(_) => DockerDfSummary::default(),
     }
@@ -237,18 +282,53 @@ fn inspect_docker_df() -> DockerDfSummary {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn measure_dir_fast(path: &Path) -> u64 {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
     if !path.exists() {
         return 0;
     }
-    if let Ok(output) = Command::new("du").args(["-skx"]).arg(path).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Some(first) = stdout.split_whitespace().next() {
-            if let Ok(kb) = first.parse::<u64>() {
-                return kb.saturating_mul(1024);
+    let Ok(mut child) = Command::new("du")
+        .args(["-skx"])
+        .arg(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return 0;
+    };
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let mut stdout = String::new();
+                if let Some(mut out) = child.stdout.take() {
+                    let _ = out.read_to_string(&mut stdout);
+                }
+                if let Some(first) = stdout.split_whitespace().next() {
+                    if let Ok(kb) = first.parse::<u64>() {
+                        return kb.saturating_mul(1024);
+                    }
+                }
+                return 0;
+            }
+            Ok(None) => {
+                if started.elapsed() >= Duration::from_secs(30) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return 0;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return 0;
             }
         }
     }
-    0
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

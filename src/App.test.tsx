@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { clearDiskAnalyzerCache } from "./components/DiskAnalyzerView";
 import { api } from "./lib/api";
 
 vi.mock("./lib/api", () => ({
@@ -49,6 +50,7 @@ const mockedApi = vi.mocked(api);
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearDiskAnalyzerCache();
     mockedApi.appVersion.mockResolvedValue("0.1.0");
     mockedApi.getSettings.mockResolvedValue({
       default_ide: "cursor",

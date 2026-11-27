@@ -122,14 +122,92 @@ function buildBreadcrumbs(rootPath: string): BreadcrumbSegment[] {
 
 const DONUT_RADIUS = 82;
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
+const DISK_CACHE_STORAGE_KEY = "affexdesk.disk_analyzer.last_state.v1";
+
+interface CachedDiskScan {
+  currentDir: string | null;
+  report: DiskBreakdownReport;
+  scannedAt: string;
+}
+
+const directoryScanCache = new Map<string, CachedDiskScan>();
+let lastDiskScanState: CachedDiskScan | null = null;
+
+function cacheKeyForDir(dir: string | null): string {
+  return dir ?? "__HOME__";
+}
+
+function readPersistedDiskScan(): CachedDiskScan | null {
+  if (lastDiskScanState) return lastDiskScanState;
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(DISK_CACHE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedDiskScan;
+    if (!parsed || !parsed.report || typeof parsed.report.root_path !== "string") {
+      return null;
+    }
+    lastDiskScanState = parsed;
+    directoryScanCache.set(cacheKeyForDir(parsed.currentDir), parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persistDiskScan(entry: CachedDiskScan): void {
+  lastDiskScanState = entry;
+  directoryScanCache.set(cacheKeyForDir(entry.currentDir), entry);
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.setItem(DISK_CACHE_STORAGE_KEY, JSON.stringify(entry));
+    }
+  } catch {
+    // localStorage dolu veya erişilemezse yalnızca bellek önbelleğini kullan
+  }
+}
+
+export function clearDiskAnalyzerCache(): void {
+  lastDiskScanState = null;
+  directoryScanCache.clear();
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.removeItem(DISK_CACHE_STORAGE_KEY);
+    }
+  } catch {
+    // yoksay
+  }
+}
+
+function formatScanTime(iso: string | null): string | null {
+  if (!iso) return null;
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toLocaleTimeString("tr-TR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return null;
+  }
+}
 
 export function DiskAnalyzerView({
   onOpenFinder,
   onRefreshTelemetry,
   onNotify,
 }: DiskAnalyzerViewProps) {
-  const [report, setReport] = useState<DiskBreakdownReport | null>(null);
-  const [currentDir, setCurrentDir] = useState<string | null>(null);
+  const initialCached = useMemo(() => readPersistedDiskScan(), []);
+  const [report, setReport] = useState<DiskBreakdownReport | null>(
+    () => initialCached?.report ?? null
+  );
+  const [currentDir, setCurrentDir] = useState<string | null>(
+    () => initialCached?.currentDir ?? null
+  );
+  const [scannedAt, setScannedAt] = useState<string | null>(
+    () => initialCached?.scannedAt ?? null
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -137,26 +215,54 @@ export function DiskAnalyzerView({
   const [trashTarget, setTrashTarget] = useState<DiskEntry | null>(null);
   const [trashing, setTrashing] = useState(false);
 
-  const loadDirectory = useCallback(async (targetDir: string | null) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.scanDiskBreakdown(targetDir);
-      setReport(data);
-      setCurrentDir(targetDir);
-      setSelectedCategory(null);
-    } catch (err) {
-      const msg = String(err);
-      setError(msg);
-      onNotify("error", `Disk taraması başarısız: ${msg}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [onNotify]);
+  const loadDirectory = useCallback(
+    async (targetDir: string | null, options?: { force?: boolean }) => {
+      const key = cacheKeyForDir(targetDir);
+      if (!options?.force) {
+        const cached = directoryScanCache.get(key);
+        if (cached) {
+          lastDiskScanState = cached;
+          setReport(cached.report);
+          setCurrentDir(cached.currentDir);
+          setScannedAt(cached.scannedAt);
+          setSelectedCategory(null);
+          setError(null);
+          return;
+        }
+      }
+
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await api.scanDiskBreakdown(targetDir);
+        const nowIso = new Date().toISOString();
+        persistDiskScan({
+          currentDir: targetDir,
+          report: data,
+          scannedAt: nowIso,
+        });
+        setReport(data);
+        setCurrentDir(targetDir);
+        setScannedAt(nowIso);
+        setSelectedCategory(null);
+      } catch (err) {
+        const msg = String(err);
+        setError(msg);
+        onNotify("error", `Disk taraması başarısız: ${msg}`);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [onNotify]
+  );
 
   useEffect(() => {
-    void loadDirectory(null);
-  }, [loadDirectory]);
+    if (!report) {
+      void loadDirectory(null);
+    }
+    // Yalnızca ilk açılışta kayıtlı tarama yoksa otomatik tara; sonraki girişlerde son tarama korunur.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleConfirmTrash = useCallback(async () => {
     if (!trashTarget) return;
@@ -170,7 +276,11 @@ export function DiskAnalyzerView({
         )}).`
       );
       setTrashTarget(null);
-      await Promise.all([loadDirectory(currentDir), onRefreshTelemetry()]);
+      directoryScanCache.clear();
+      await Promise.all([
+        loadDirectory(currentDir, { force: true }),
+        onRefreshTelemetry(),
+      ]);
     } catch (err) {
       const raw = String(err);
       if (raw.includes("protected_path")) {
@@ -233,6 +343,8 @@ export function DiskAnalyzerView({
     return all.filter((entry) => entry.category === selectedCategory);
   }, [report, selectedCategory]);
 
+  const formattedScanTime = useMemo(() => formatScanTime(scannedAt), [scannedAt]);
+
   return (
     <div className="view-stack">
       <header className="view-header">
@@ -242,7 +354,7 @@ export function DiskAnalyzerView({
             {report
               ? `${report.root_path} · Taranan: ${formatBytes(
                   report.total_scanned_bytes
-                )}`
+                )}${formattedScanTime ? ` · Son tarama: ${formattedScanTime}` : ""}`
               : "Disk doluluğunu kategorilere ayırın, klasörlerin içine girin ve güvenle Çöp Sepetine taşıyın"}
           </p>
         </div>
@@ -259,7 +371,7 @@ export function DiskAnalyzerView({
           <button
             type="button"
             className="btn btn--secondary"
-            onClick={() => void loadDirectory(currentDir)}
+            onClick={() => void loadDirectory(currentDir, { force: true })}
             disabled={loading}
           >
             <RefreshCw size={15} className={loading ? "spin" : ""} />

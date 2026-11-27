@@ -160,8 +160,10 @@ fn run_cli_with_timeout(bin: &str, args: &[&str], timeout_secs: u64) -> Result<S
     use std::process::Stdio;
     use std::time::{Duration, Instant};
 
+    let work_dir = dirs::home_dir().unwrap_or_else(std::env::temp_dir);
     let mut child = Command::new(bin)
         .args(args)
+        .current_dir(&work_dir)
         .env("PATH", extended_path_env())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -255,6 +257,8 @@ pub fn parse_docker_size_bytes(raw: &str) -> u64 {
 #[derive(Debug, Default)]
 struct DockerDfSummary {
     available: bool,
+    df_timed_out: bool,
+    raw_disk_bytes: u64,
     build_cache_bytes: u64,
     build_cache_count: u64,
     images_reclaimable_bytes: u64,
@@ -326,15 +330,15 @@ fn parse_docker_df_json_lines(stdout: &str) -> DockerDfSummary {
 }
 
 fn inspect_docker_df() -> DockerDfSummary {
-    // Önce 15 sn içinde tam `docker system df` almayı dene
+    // Önce 25 sn içinde tam `docker system df` almayı dene
     if let Ok(stdout) =
-        run_cli_with_timeout("docker", &["system", "df", "--format", "{{json .}}"], 15)
+        run_cli_with_timeout("docker", &["system", "df", "--format", "{{json .}}"], 25)
     {
         return parse_docker_df_json_lines(&stdout);
     }
 
-    // 500 GB+ büyük Docker disklerinde `system df` 2+ dk sürebilir;
-    // Docker çalışıyorsa (docker info < 3 sn) kalemleri gizlemek yerine yine de göster
+    // Çok fazla volume/imaj varsa `system df` zaman aşımına uğrayabilir;
+    // Docker çalışıyorsa (docker info < 3 sn) DB volume boyutunu yanlışlıkla Build Cache gibi gösterme!
     if run_cli_with_timeout("docker", &["info", "--format", "{{.ServerVersion}}"], 3).is_ok() {
         let raw_size = dirs::home_dir()
             .map(|h| {
@@ -343,16 +347,9 @@ fn inspect_docker_df() -> DockerDfSummary {
             .unwrap_or(0);
         return DockerDfSummary {
             available: true,
-            // Gerçek alt kırılım ölçülemedi ama Build Cache & İmaj temizliği her zaman erişilebilir kalsın
-            build_cache_bytes: raw_size.max(1024 * 1024),
-            build_cache_count: 0,
-            images_reclaimable_bytes: 1024 * 1024,
-            images_total_count: 0,
-            images_active_count: 0,
-            containers_reclaimable_bytes: 0,
-            containers_stopped_count: 0,
-            volumes_reclaimable_bytes: 0,
-            volumes_unused_count: 0,
+            df_timed_out: true,
+            raw_disk_bytes: raw_size,
+            ..Default::default()
         };
     }
 
@@ -574,7 +571,34 @@ pub fn scan_system_cleaner() -> Result<CleanerScanReport, String> {
     // 1. Docker (cross-platform)
     let docker = inspect_docker_df();
     if docker.available {
-        if docker.build_cache_bytes > 0 {
+        if docker.df_timed_out {
+            let raw_gb = docker.raw_disk_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+            items.push(CleanerItem {
+                id: "docker_build_cache".to_string(),
+                title: "Docker Build Cache (Boyut Ölçülemedi)".to_string(),
+                subtitle: format!(
+                    "docker system df zaman aşımına uğradı — Docker.raw toplamı {:.1} GB (veritabanı volume'leri dahil)",
+                    raw_gb
+                ),
+                category: "docker".to_string(),
+                risk: "safe".to_string(),
+                size_bytes: 0,
+                default_selected: false,
+                path_hint: Some("docker builder prune -a -f".to_string()),
+                note: Some("Yalnızca derleme önbelleğini temizler; veritabanı volume'lerine ve konteynerlere dokunmaz.".to_string()),
+            });
+            items.push(CleanerItem {
+                id: "docker_unused_images".to_string(),
+                title: "Kullanılmayan Docker İmajları (Boyut Ölçülemedi)".to_string(),
+                subtitle: "docker system df zaman aşımına uğradı — isteğe bağlı çalıştırabilirsiniz".to_string(),
+                category: "docker".to_string(),
+                risk: "review".to_string(),
+                size_bytes: 0,
+                default_selected: false,
+                path_hint: Some("docker image prune -a -f".to_string()),
+                note: Some("Çalışan konteynerlerin imajlarına ve DB volume'lerine dokunmaz; kullanılmayan imajları kaldırır.".to_string()),
+            });
+        } else if docker.build_cache_bytes > 0 {
             items.push(CleanerItem {
                 id: "docker_build_cache".to_string(),
                 title: "Docker Build Cache".to_string(),

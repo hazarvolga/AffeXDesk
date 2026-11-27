@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Cpu,
   Flame,
+  GripVertical,
   HardDrive,
   Maximize2,
   MemoryStick,
@@ -42,13 +44,27 @@ export function FloatingHudBar() {
     void api.setFloatingHud(false);
   };
 
+  const handleDragMouseDown = (e: MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("button")) return;
+    e.preventDefault();
+    void getCurrentWindow().startDragging();
+  };
+
   const cpuPct = metrics?.cpu_usage_pct ?? 0;
   const memPct = metrics?.mem_used_pct ?? 0;
   const diskPct = metrics?.disk_used_pct ?? 0;
 
   return (
-    <div className="floating-hud" data-tauri-drag-region>
+    <div
+      className="floating-hud"
+      data-tauri-drag-region
+      onMouseDown={handleDragMouseDown}
+      title="Sürükleyerek ekranın istediğiniz yerine taşıyabilirsiniz"
+    >
       <div className="floating-hud__brand" data-tauri-drag-region>
+        <GripVertical size={12} className="muted" />
         <TerminalSquare size={13} className="text-cyan" />
       </div>
 

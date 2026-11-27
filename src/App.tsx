@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import gsap from "gsap";
 import {
   BookOpen,
   CheckCircle2,
@@ -539,21 +540,95 @@ export default function App() {
     settings.module_social_bridge === "true" ||
     Boolean(socialSnapshot?.connected);
 
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
   const handleBootComplete = useCallback(() => {
     setBootStage("entering");
     window.setTimeout(() => {
       setBootStage("ready");
-    }, 1050);
+    }, 950);
   }, []);
+
+  // GSAP orchestrated shell entrance right after WebGL warp-dive completes
+  useLayoutEffect(() => {
+    const mode = (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE;
+    if (mode === "test" || bootStage !== "entering" || !shellRef.current) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+    const ctx = gsap.context(() => {
+      gsap.fromTo(
+        ".sidebar",
+        { x: -24, opacity: 0 },
+        { x: 0, opacity: 1, duration: 0.52, ease: "power3.out", clearProps: "transform,opacity" }
+      );
+      gsap.fromTo(
+        ".sidebar .nav-item",
+        { x: -14, opacity: 0 },
+        {
+          x: 0,
+          opacity: 1,
+          duration: 0.42,
+          stagger: 0.032,
+          delay: 0.08,
+          ease: "power3.out",
+          clearProps: "transform,opacity",
+        }
+      );
+      gsap.fromTo(
+        ".telemetry-ribbon",
+        { y: -14, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.44, delay: 0.1, ease: "power3.out", clearProps: "transform,opacity" }
+      );
+    }, shellRef);
+
+    return () => ctx.revert();
+  }, [bootStage]);
+
+  // GSAP 3D-perspective staggered card choreography on boot reveal & every tab switch
+  useLayoutEffect(() => {
+    const mode = (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE;
+    if (mode === "test" || bootStage === "splash" || !stageRef.current) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+    const ctx = gsap.context(() => {
+      const targets = stageRef.current?.querySelectorAll(
+        ".metric-card, .panel, .project-card, .client-card, .quick-win-card, .cleaner-row"
+      );
+      if (!targets || targets.length === 0) return;
+      const isBoot = bootStage === "entering";
+      gsap.fromTo(
+        targets,
+        {
+          y: isBoot ? 28 : 16,
+          rotateX: isBoot ? 7 : 3,
+          scale: isBoot ? 0.955 : 0.98,
+          opacity: 0,
+          transformPerspective: 900,
+          transformOrigin: "50% 0%",
+        },
+        {
+          y: 0,
+          rotateX: 0,
+          scale: 1,
+          opacity: 1,
+          duration: isBoot ? 0.56 : 0.34,
+          stagger: { amount: isBoot ? 0.3 : 0.16, from: "start" },
+          delay: isBoot ? 0.08 : 0,
+          ease: "power3.out",
+          clearProps: "transform,opacity",
+        }
+      );
+    }, stageRef);
+
+    return () => ctx.revert();
+  }, [activeTab, bootStage]);
 
   return (
     <div
+      ref={shellRef}
       className={`app-shell${
-        bootStage === "splash"
-          ? " app-shell--booting"
-          : bootStage === "entering"
-          ? " app-shell--entering"
-          : ""
+        bootStage === "splash" ? " app-shell--booting" : ""
       }`}
     >
       {bootStage === "splash" && (
@@ -798,7 +873,7 @@ export default function App() {
           </div>
         )}
 
-        <div key={activeTab} className="tab-stage">
+        <div key={activeTab} ref={stageRef} className="tab-stage">
           {activeTab === "overview" && (
             <OverviewView
               metrics={metrics}

@@ -2765,7 +2765,7 @@ button.telemetry-ribbon__item:hover {
 
 
 /* ==========================================================================
-   Boot Splash & Pro Motion Choreography (Zero-Dep, GPU-Only)
+   Three.js WebGL2 Boot Splash & GSAP Motion System
    ========================================================================== */
 .brand__mark--interactive {
   cursor: pointer;
@@ -2793,47 +2793,67 @@ button.telemetry-ribbon__item:hover {
   justify-content: center;
   overflow: hidden;
   cursor: pointer;
-  opacity: 1;
-  transition: opacity 440ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 460ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.boot-splash__skip {
-  position: absolute;
-  right: 22px;
-  bottom: 18px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: rgba(161, 161, 170, 0.42);
-  pointer-events: none;
-}
-
-.boot-splash--exit {
-  opacity: 0;
-  transform: scale(1.015);
-  pointer-events: none;
-}
-
-.boot-splash__canvas {
+.boot-splash__webgl {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-.boot-splash__hairline {
+.boot-splash__webgl canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.boot-splash__vignette {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    rgba(56, 189, 248, 0) 0%,
-    rgba(56, 189, 248, 0.32) 50%,
-    rgba(56, 189, 248, 0) 100%
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 50% 46%,
+    rgba(9, 9, 11, 0) 28%,
+    rgba(9, 9, 11, 0.72) 100%
   );
-  transform-origin: center;
-  animation: boot-hairline 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.boot-hud-corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: rgba(56, 189, 248, 0.35);
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+}
+
+.boot-hud-corner--tl {
+  top: 22px;
+  left: 22px;
+  border-top-width: 1px;
+  border-left-width: 1px;
+}
+
+.boot-hud-corner--tr {
+  top: 22px;
+  right: 22px;
+  border-top-width: 1px;
+  border-right-width: 1px;
+}
+
+.boot-hud-corner--bl {
+  bottom: 22px;
+  left: 22px;
+  border-bottom-width: 1px;
+  border-left-width: 1px;
+}
+
+.boot-hud-corner--br {
+  bottom: 22px;
+  right: 22px;
+  border-bottom-width: 1px;
+  border-right-width: 1px;
 }
 
 .boot-splash__core {
@@ -2842,17 +2862,20 @@ button.telemetry-ribbon__item:hover {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 24px 32px;
-  margin-top: 128px;
-  animation: boot-core-in 480ms cubic-bezier(0.16, 1, 0.3, 1) 80ms both;
+  gap: 10px;
+  padding: 18px 28px;
+  margin-top: 270px;
+  background: rgba(9, 9, 11, 0.56);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 3px;
+  backdrop-filter: blur(8px);
 }
 
 .boot-splash__mark {
-  width: 44px;
-  height: 44px;
+  width: 36px;
+  height: 36px;
   border-radius: 3px;
-  background: #111114;
+  background: rgba(17, 17, 20, 0.9);
   border: 1px solid rgba(56, 189, 248, 0.45);
   color: #38bdf8;
   display: flex;
@@ -2867,11 +2890,11 @@ button.telemetry-ribbon__item:hover {
 }
 
 .boot-splash__wordmark {
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.28em;
   color: #f4f4f5;
-  text-indent: 0.24em;
+  text-indent: 0.28em;
 }
 
 .boot-splash__version {
@@ -2879,8 +2902,14 @@ button.telemetry-ribbon__item:hover {
   color: #71717a;
 }
 
+.boot-splash__bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .boot-splash__bar {
-  width: 220px;
+  width: 240px;
   height: 2px;
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
@@ -2891,9 +2920,16 @@ button.telemetry-ribbon__item:hover {
   display: block;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, #38bdf8 0%, #10b981 100%);
+  background: linear-gradient(90deg, #38bdf8 0%, #10b981 65%, #818cf8 100%);
   transform-origin: left center;
-  animation: boot-bar-fill 2250ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
+  transform: scaleX(0);
+}
+
+.boot-splash__pct {
+  font-size: 11px;
+  color: #38bdf8;
+  min-width: 34px;
+  text-align: right;
 }
 
 .boot-splash__status {
@@ -2905,68 +2941,24 @@ button.telemetry-ribbon__item:hover {
   color: #a1a1aa;
 }
 
-@keyframes boot-hairline {
-  from {
-    opacity: 0;
-    transform: scaleX(0);
-  }
-  to {
-    opacity: 1;
-    transform: scaleX(1);
-  }
+.boot-splash__meta {
+  position: absolute;
+  left: 26px;
+  bottom: 22px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: rgba(56, 189, 248, 0.45);
+  pointer-events: none;
 }
 
-@keyframes boot-core-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@keyframes boot-bar-fill {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-
-@keyframes sidebar-glide-in {
-  from {
-    opacity: 0;
-    transform: translateX(-12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes ribbon-drop-in {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes stage-card-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.988);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+.boot-splash__skip {
+  position: absolute;
+  right: 26px;
+  bottom: 22px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: rgba(161, 161, 170, 0.45);
+  pointer-events: none;
 }
 
 /* While splash is active, keep shell quietly prepped behind it */
@@ -2975,16 +2967,6 @@ button.telemetry-ribbon__item:hover {
   opacity: 0;
 }
 
-/* Orchestrated entrance right as splash lifts */
-.app-shell--entering .sidebar {
-  animation: sidebar-glide-in 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.app-shell--entering .telemetry-ribbon {
-  animation: ribbon-drop-in 480ms cubic-bezier(0.16, 1, 0.3, 1) 90ms both;
-}
-
-/* Staggered pro card & panel choreography on boot and every tab switch */
 .tab-stage {
   display: flex;
   flex-direction: column;
@@ -2992,98 +2974,7 @@ button.telemetry-ribbon__item:hover {
   min-width: 0;
 }
 
-.tab-stage .metric-card,
-.tab-stage .panel,
-.tab-stage .project-card,
-.tab-stage .client-card,
-.tab-stage .quick-win-card,
-.tab-stage .cleaner-row {
-  animation: stage-card-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.app-shell--entering .tab-stage .metric-card,
-.app-shell--entering .tab-stage .panel,
-.app-shell--entering .tab-stage .project-card,
-.app-shell--entering .tab-stage .client-card {
-  animation-duration: 560ms;
-}
-
-.tab-stage .metric-card:nth-child(1),
-.tab-stage .project-card:nth-child(1),
-.tab-stage .client-card:nth-child(1),
-.tab-stage .quick-win-card:nth-child(1),
-.tab-stage .cleaner-row:nth-child(1) {
-  animation-delay: 40ms;
-}
-
-.tab-stage .metric-card:nth-child(2),
-.tab-stage .project-card:nth-child(2),
-.tab-stage .client-card:nth-child(2),
-.tab-stage .quick-win-card:nth-child(2),
-.tab-stage .cleaner-row:nth-child(2) {
-  animation-delay: 95ms;
-}
-
-.tab-stage .metric-card:nth-child(3),
-.tab-stage .project-card:nth-child(3),
-.tab-stage .client-card:nth-child(3),
-.tab-stage .quick-win-card:nth-child(3),
-.tab-stage .cleaner-row:nth-child(3) {
-  animation-delay: 150ms;
-}
-
-.tab-stage .metric-card:nth-child(4),
-.tab-stage .project-card:nth-child(4),
-.tab-stage .client-card:nth-child(4),
-.tab-stage .quick-win-card:nth-child(4),
-.tab-stage .cleaner-row:nth-child(4) {
-  animation-delay: 205ms;
-}
-
-.tab-stage .project-card:nth-child(5),
-.tab-stage .client-card:nth-child(5),
-.tab-stage .quick-win-card:nth-child(5),
-.tab-stage .cleaner-row:nth-child(5) {
-  animation-delay: 260ms;
-}
-
-.tab-stage .project-card:nth-child(6),
-.tab-stage .client-card:nth-child(6),
-.tab-stage .quick-win-card:nth-child(6),
-.tab-stage .cleaner-row:nth-child(6) {
-  animation-delay: 315ms;
-}
-
-.tab-stage .project-card:nth-child(n + 7),
-.tab-stage .client-card:nth-child(n + 7),
-.tab-stage .quick-win-card:nth-child(n + 7),
-.tab-stage .cleaner-row:nth-child(n + 7) {
-  animation-delay: 360ms;
-}
-
-.tab-stage .panel {
-  animation-delay: 140ms;
-}
-
 /* Crisp tactile button press feedback */
 .btn:active:not(:disabled) {
   transform: scale(0.98);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .boot-splash,
-  .boot-splash__hairline,
-  .boot-splash__core,
-  .boot-splash__bar-fill,
-  .app-shell--entering .sidebar,
-  .app-shell--entering .telemetry-ribbon,
-  .tab-stage .metric-card,
-  .tab-stage .panel,
-  .tab-stage .project-card,
-  .tab-stage .client-card,
-  .tab-stage .quick-win-card,
-  .tab-stage .cleaner-row {
-    animation: none !important;
-    transition: none !important;
-  }
 }

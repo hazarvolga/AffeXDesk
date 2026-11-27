@@ -2794,8 +2794,18 @@ button.telemetry-ribbon__item:hover {
   overflow: hidden;
   cursor: pointer;
   opacity: 1;
-  transition: opacity 320ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 340ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 440ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 460ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.boot-splash__skip {
+  position: absolute;
+  right: 22px;
+  bottom: 18px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: rgba(161, 161, 170, 0.42);
+  pointer-events: none;
 }
 
 .boot-splash--exit {
@@ -2883,7 +2893,7 @@ button.telemetry-ribbon__item:hover {
   height: 100%;
   background: linear-gradient(90deg, #38bdf8 0%, #10b981 100%);
   transform-origin: left center;
-  animation: boot-bar-fill 920ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
+  animation: boot-bar-fill 2250ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
 }
 
 .boot-splash__status {
@@ -2967,11 +2977,11 @@ button.telemetry-ribbon__item:hover {
 
 /* Orchestrated entrance right as splash lifts */
 .app-shell--entering .sidebar {
-  animation: sidebar-glide-in 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: sidebar-glide-in 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .app-shell--entering .telemetry-ribbon {
-  animation: ribbon-drop-in 320ms cubic-bezier(0.16, 1, 0.3, 1) 60ms both;
+  animation: ribbon-drop-in 480ms cubic-bezier(0.16, 1, 0.3, 1) 90ms both;
 }
 
 /* Staggered pro card & panel choreography on boot and every tab switch */
@@ -2988,14 +2998,14 @@ button.telemetry-ribbon__item:hover {
 .tab-stage .client-card,
 .tab-stage .quick-win-card,
 .tab-stage .cleaner-row {
-  animation: stage-card-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: stage-card-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .app-shell--entering .tab-stage .metric-card,
 .app-shell--entering .tab-stage .panel,
 .app-shell--entering .tab-stage .project-card,
 .app-shell--entering .tab-stage .client-card {
-  animation-duration: 380ms;
+  animation-duration: 560ms;
 }
 
 .tab-stage .metric-card:nth-child(1),
@@ -3003,7 +3013,7 @@ button.telemetry-ribbon__item:hover {
 .tab-stage .client-card:nth-child(1),
 .tab-stage .quick-win-card:nth-child(1),
 .tab-stage .cleaner-row:nth-child(1) {
-  animation-delay: 20ms;
+  animation-delay: 40ms;
 }
 
 .tab-stage .metric-card:nth-child(2),
@@ -3011,7 +3021,7 @@ button.telemetry-ribbon__item:hover {
 .tab-stage .client-card:nth-child(2),
 .tab-stage .quick-win-card:nth-child(2),
 .tab-stage .cleaner-row:nth-child(2) {
-  animation-delay: 55ms;
+  animation-delay: 95ms;
 }
 
 .tab-stage .metric-card:nth-child(3),
@@ -3019,7 +3029,7 @@ button.telemetry-ribbon__item:hover {
 .tab-stage .client-card:nth-child(3),
 .tab-stage .quick-win-card:nth-child(3),
 .tab-stage .cleaner-row:nth-child(3) {
-  animation-delay: 90ms;
+  animation-delay: 150ms;
 }
 
 .tab-stage .metric-card:nth-child(4),
@@ -3027,32 +3037,32 @@ button.telemetry-ribbon__item:hover {
 .tab-stage .client-card:nth-child(4),
 .tab-stage .quick-win-card:nth-child(4),
 .tab-stage .cleaner-row:nth-child(4) {
-  animation-delay: 125ms;
+  animation-delay: 205ms;
 }
 
 .tab-stage .project-card:nth-child(5),
 .tab-stage .client-card:nth-child(5),
 .tab-stage .quick-win-card:nth-child(5),
 .tab-stage .cleaner-row:nth-child(5) {
-  animation-delay: 160ms;
+  animation-delay: 260ms;
 }
 
 .tab-stage .project-card:nth-child(6),
 .tab-stage .client-card:nth-child(6),
 .tab-stage .quick-win-card:nth-child(6),
 .tab-stage .cleaner-row:nth-child(6) {
-  animation-delay: 195ms;
+  animation-delay: 315ms;
 }
 
 .tab-stage .project-card:nth-child(n + 7),
 .tab-stage .client-card:nth-child(n + 7),
 .tab-stage .quick-win-card:nth-child(n + 7),
 .tab-stage .cleaner-row:nth-child(n + 7) {
-  animation-delay: 220ms;
+  animation-delay: 360ms;
 }
 
 .tab-stage .panel {
-  animation-delay: 85ms;
+  animation-delay: 140ms;
 }
 
 /* Crisp tactile button press feedback */

@@ -543,7 +543,7 @@ export default function App() {
     setBootStage("entering");
     window.setTimeout(() => {
       setBootStage("ready");
-    }, 650);
+    }, 1050);
   }, []);
 
   return (

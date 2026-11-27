@@ -7,9 +7,10 @@ export interface BootSplashProps {
 }
 
 const BOOT_STEPS = [
-  "TELEMETRY ENGINE",
-  "WORKSPACE INDEX",
-  "MISSION CONTROL READY",
+  "SYSTEM TELEMETRY · SYNCING",
+  "WORKSPACE & GIT INDEX · ONLINE",
+  "LOCAL AI & DISK ENGINE · READY",
+  "MISSION CONTROL · ARMED",
 ];
 
 // 3D wireframe octahedron + outer cube vertices for a crisp, zero-dependency
@@ -58,21 +59,22 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
     setExiting(true);
     window.setTimeout(() => {
       onComplete();
-    }, 340);
+    }, 440);
   };
 
   useEffect(() => {
-    const t1 = window.setTimeout(() => setStepIdx(1), 320);
-    const t2 = window.setTimeout(() => setStepIdx(2), 660);
+    const t1 = window.setTimeout(() => setStepIdx(1), 620);
+    const t2 = window.setTimeout(() => setStepIdx(2), 1280);
+    const t3 = window.setTimeout(() => setStepIdx(3), 1880);
     const tExit = window.setTimeout(() => {
       if (!completedRef.current) {
         completedRef.current = true;
         setExiting(true);
       }
-    }, 1020);
+    }, 2400);
     const tDone = window.setTimeout(() => {
       onComplete();
-    }, 1360);
+    }, 2860);
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" || e.key === " " || e.key === "Enter") {
@@ -84,6 +86,7 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
+      window.clearTimeout(t3);
       window.clearTimeout(tExit);
       window.clearTimeout(tDone);
       window.removeEventListener("keydown", onKeyDown);
@@ -166,11 +169,11 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
       ctx.stroke();
 
       // Exponential ease-out entrance scale for the 3D wireframe
-      const enterProgress = Math.min(1, elapsed / 0.65);
+      const enterProgress = Math.min(1, elapsed / 1.15);
       const eased = 1 - Math.pow(1 - enterProgress, 4);
-      const baseScale = Math.min(w, h) * 0.16 * (0.72 + 0.28 * eased);
-      const rotY = elapsed * 1.15 + 0.55;
-      const rotX = 0.42 + Math.sin(elapsed * 0.9) * 0.14;
+      const baseScale = Math.min(w, h) * 0.175 * (0.65 + 0.35 * eased);
+      const rotY = elapsed * 0.9 + 0.55;
+      const rotX = 0.42 + Math.sin(elapsed * 0.75) * 0.16;
 
       // Outer wireframe cube (subtle steel-cyan)
       const projCube = CUBE_VERTS.map((v) =>
@@ -248,6 +251,7 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
           <span>{BOOT_STEPS[stepIdx]}</span>
         </div>
       </div>
+      <span className="boot-splash__skip mono">ESC / CLICK TO SKIP</span>
     </div>
   );
 }

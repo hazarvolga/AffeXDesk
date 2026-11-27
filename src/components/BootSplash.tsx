@@ -497,7 +497,7 @@ export function BootSplash({
       }
     }
 
-    // GSAP Master Spaceship Scanner Timeline (~5.5s, click/ESC to skip anytime)
+    // GSAP Master Spaceship Scanner Timeline (~7.5s, click/ESC to skip anytime)
     const tl = gsap.timeline({
       onComplete: () => {
         if (!finishedRef.current) {
@@ -511,7 +511,7 @@ export function BootSplash({
     if (camera) {
       tl.to(
         camera.position,
-        { y: 3.0, z: 7.2, duration: 2.6, ease: "expo.out" },
+        { y: 3.0, z: 7.2, duration: 3.1, ease: "expo.out" },
         0
       );
     }
@@ -519,17 +519,18 @@ export function BootSplash({
     tl.fromTo(
       state,
       { scanZ: -11 },
-      { scanZ: 8, duration: 1.75, ease: "power1.inOut" },
+      { scanZ: 8, duration: 2.1, ease: "power1.inOut" },
       0.05
     )
-      .to(state, { scanZ: -8, duration: 1.55, ease: "power1.inOut" }, 1.8)
-      .to(state, { scanZ: 4, duration: 1.4, ease: "power2.inOut" }, 3.35);
+      .to(state, { scanZ: -9, duration: 2.1, ease: "power1.inOut" }, 2.15)
+      .to(state, { scanZ: 7, duration: 2.1, ease: "power1.inOut" }, 4.25)
+      .to(state, { scanZ: -2, duration: 0.7, ease: "power2.out" }, 6.35);
 
     if (reticleRef.current) {
       tl.fromTo(
         reticleRef.current,
         { scale: 1.28, opacity: 0, rotate: -14 },
-        { scale: 1, opacity: 1, rotate: 0, duration: 1.35, ease: "expo.out" },
+        { scale: 1, opacity: 1, rotate: 0, duration: 1.45, ease: "expo.out" },
         0.1
       );
     }
@@ -538,7 +539,7 @@ export function BootSplash({
       tl.fromTo(
         hudRef.current,
         { opacity: 0, y: 14 },
-        { opacity: 1, y: 0, duration: 0.85, ease: "power3.out" },
+        { opacity: 1, y: 0, duration: 0.9, ease: "power3.out" },
         0.22
       );
     }
@@ -547,7 +548,7 @@ export function BootSplash({
       tl.fromTo(
         leftWingRef.current,
         { opacity: 0, x: -32 },
-        { opacity: 1, x: 0, duration: 0.9, ease: "power3.out" },
+        { opacity: 1, x: 0, duration: 0.95, ease: "power3.out" },
         0.32
       );
     }
@@ -556,24 +557,24 @@ export function BootSplash({
       tl.fromTo(
         rightWingRef.current,
         { opacity: 0, x: 32 },
-        { opacity: 1, x: 0, duration: 0.9, ease: "power3.out" },
+        { opacity: 1, x: 0, duration: 0.95, ease: "power3.out" },
         0.38
       );
     }
 
-    // Live scanner sweep (0% -> 100% over 4.2s so repos & clients are cleanly legible)
+    // Live scanner sweep (0% -> 100% over 6.0s so background scans finish & repos/clients stream clearly)
     tl.to(
       state,
       {
         progress: 1,
-        duration: 4.2,
+        duration: 6.0,
         ease: "power1.inOut",
         onUpdate: () => {
           const p = state.progress;
           setPercent(Math.round(p * 100));
           setProgressRatio(p);
           if (p > 0.94) setScanState("LOCKED");
-          else if (p > 0.32) setScanState("INDEXING");
+          else if (p > 0.3) setScanState("INDEXING");
 
           const az = (p * 360).toFixed(1).padStart(5, "0");
           const el = (18.4 + Math.sin(p * Math.PI * 2) * 4.2).toFixed(1);
@@ -596,58 +597,58 @@ export function BootSplash({
           setDisplayTitle(out);
         },
       },
-      0.28
+      0.3
     );
 
     // Target Lock emerald flash + brief hold + Tactical Shutter Split Reveal
-    tl.to(state, { lockFlash: 1, duration: 0.2, ease: "power2.out" }, 4.55)
-      .to(state, { lockFlash: 0, duration: 0.32 }, 4.75);
+    tl.to(state, { lockFlash: 1, duration: 0.22, ease: "power2.out" }, 6.45)
+      .to(state, { lockFlash: 0, duration: 0.35 }, 6.67);
 
     if (camera) {
       tl.to(
         camera.position,
         { y: 1.2, z: 3.4, duration: 0.65, ease: "power3.in" },
-        4.92
+        6.92
       );
     }
     if (leftWingRef.current) {
-      tl.to(leftWingRef.current, { opacity: 0, x: -34, duration: 0.38, ease: "power2.in" }, 4.92);
+      tl.to(leftWingRef.current, { opacity: 0, x: -34, duration: 0.38, ease: "power2.in" }, 6.92);
     }
     if (rightWingRef.current) {
-      tl.to(rightWingRef.current, { opacity: 0, x: 34, duration: 0.38, ease: "power2.in" }, 4.92);
+      tl.to(rightWingRef.current, { opacity: 0, x: 34, duration: 0.38, ease: "power2.in" }, 6.92);
     }
     if (hudRef.current) {
       tl.to(
         hudRef.current,
         { opacity: 0, scale: 0.97, duration: 0.36, ease: "power2.in" },
-        4.96
+        6.96
       );
     }
     if (reticleRef.current) {
       tl.to(
         reticleRef.current,
         { opacity: 0, scale: 1.18, duration: 0.42, ease: "power2.in" },
-        4.96
+        6.96
       );
     }
     if (shutterTopRef.current && shutterBotRef.current) {
       tl.to(
         shutterTopRef.current,
         { yPercent: -100, duration: 0.48, ease: "expo.inOut" },
-        5.05
+        7.05
       );
       tl.to(
         shutterBotRef.current,
         { yPercent: 100, duration: 0.48, ease: "expo.inOut" },
-        5.05
+        7.05
       );
     }
-    tl.to(state, { opacity: 0, duration: 0.45, ease: "power2.in" }, 5.02);
+    tl.to(state, { opacity: 0, duration: 0.45, ease: "power2.in" }, 7.02);
     if (rootRef.current) {
       tl.to(
         rootRef.current,
         { opacity: 0, duration: 0.36, ease: "power2.inOut" },
-        5.22
+        7.22
       );
     }
 

@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use sysinfo::Disks;
 
 const MAX_ENTRIES: usize = 40;
-const MAX_SCAN_THREADS: usize = 10;
-const DU_TIMEOUT_SECS: u64 = 45;
+const MAX_SCAN_THREADS: usize = 12;
+const DU_TIMEOUT_SECS: u64 = 25;
 const QUICK_WINS_CACHE_TTL_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -733,42 +733,203 @@ fn measure_path_size(path: &Path) -> u64 {
     0
 }
 
-fn measure_paths_parallel(items: &[(String, PathBuf, bool)], include_protected: bool) -> Vec<u64> {
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn should_fan_out_dir(path: &Path, home: Option<&Path>, include_protected: bool) -> bool {
+    let Some(h) = home else {
+        return false;
+    };
+    let norm = normalize_path(path);
+    let h_norm = normalize_path(h);
+    let Ok(rel) = norm.strip_prefix(&h_norm) else {
+        return false;
+    };
+    let rel_lower = rel.to_string_lossy().replace('\\', "/").to_lowercase();
+
+    // Büyük çok-projeli geliştirme köklerini alt klasörlerine bölerek paralel ölç
+    if matches!(
+        rel_lower.as_str(),
+        "dev" | "projects" | "workspace" | "workspaces" | "repos" | ".cache"
+    ) {
+        return true;
+    }
+
+    // macOS'ta ~/Library ve büyük alt köklerini her zaman paralel alt klasörlere böl
+    // (güvenli modda TCC atlanır + alt klasör boyutları Quick Wins önbelleğine yazılır)
+    let _ = include_protected;
+    if cfg!(target_os = "macos") {
+        return matches!(
+            rel_lower.as_str(),
+            "library"
+                | "library/application support"
+                | "library/containers"
+                | "library/pnpm"
+                | "library/developer"
+        );
+    }
+
+    false
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn collect_fan_out_tasks(
+    dir: &Path,
+    parent_idx: usize,
+    home: Option<&Path>,
+    include_protected: bool,
+    depth: u8,
+    tasks: &mut Vec<(usize, PathBuf)>,
+    direct_file_bytes: &mut [u64],
+) {
+    if depth >= 3 {
+        tasks.push((parent_idx, dir.to_path_buf()));
+        return;
+    }
+    let Ok(rd) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in rd.flatten() {
+        let child = entry.path();
+        if !include_protected && is_macos_tcc_gated(&child, home) {
+            continue;
+        }
+        let Ok(m) = fs::symlink_metadata(&child) else {
+            continue;
+        };
+        if m.file_type().is_symlink() {
+            continue;
+        }
+        if m.is_file() {
+            direct_file_bytes[parent_idx] = direct_file_bytes[parent_idx].saturating_add(m.len());
+        } else if m.is_dir() {
+            if should_fan_out_dir(&child, home, include_protected) {
+                collect_fan_out_tasks(
+                    &child,
+                    parent_idx,
+                    home,
+                    include_protected,
+                    depth + 1,
+                    tasks,
+                    direct_file_bytes,
+                );
+            } else {
+                tasks.push((parent_idx, child));
+            }
+        }
+    }
+}
+
+fn measure_paths_parallel_with_cache(
+    items: &[(String, PathBuf, bool)],
+    include_protected: bool,
+    known_sizes: &mut HashMap<PathBuf, u64>,
+) -> Vec<u64> {
     let len = items.len();
     if len == 0 {
         return Vec::new();
     }
 
-    let results: Vec<Mutex<u64>> = (0..len).map(|_| Mutex::new(0)).collect();
-    let cursor = AtomicUsize::new(0);
-    let worker_count = len.clamp(1, MAX_SCAN_THREADS);
+    let mut totals = vec![0u64; len];
 
-    std::thread::scope(|scope| {
-        for _ in 0..worker_count {
-            let cursor_ref = &cursor;
-            let results_ref = &results;
-            scope.spawn(move || loop {
-                let idx = cursor_ref.fetch_add(1, Ordering::Relaxed);
-                if idx >= len {
-                    break;
-                }
-                let (_, ref path, is_dir) = items[idx];
-                let size = if is_dir {
-                    measure_dir_size(path, include_protected)
-                } else {
-                    fs::symlink_metadata(path).map(|m| m.len()).unwrap_or(0)
-                };
-                if let Ok(mut slot) = results_ref[idx].lock() {
-                    *slot = size;
-                }
-            });
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let home = dirs::home_dir();
+        let mut tasks: Vec<(usize, PathBuf)> = Vec::new();
+
+        for (idx, (_, path, is_dir)) in items.iter().enumerate() {
+            if !*is_dir {
+                let sz = fs::symlink_metadata(path).map(|m| m.len()).unwrap_or(0);
+                totals[idx] = sz;
+                known_sizes.insert(normalize_path(path), sz);
+                continue;
+            }
+            if !include_protected && is_macos_tcc_gated(path, home.as_deref()) {
+                continue;
+            }
+            if should_fan_out_dir(path, home.as_deref(), include_protected) {
+                collect_fan_out_tasks(
+                    path,
+                    idx,
+                    home.as_deref(),
+                    include_protected,
+                    0,
+                    &mut tasks,
+                    &mut totals,
+                );
+            } else {
+                tasks.push((idx, path.clone()));
+            }
         }
-    });
 
-    results
-        .into_iter()
-        .map(|m| m.into_inner().unwrap_or(0))
-        .collect()
+        if !tasks.is_empty() {
+            let task_paths: Vec<PathBuf> = tasks.iter().map(|(_, p)| p.clone()).collect();
+            let measured = measure_dirs_parallel_opt(&task_paths);
+
+            // Ara ebeveynlerin (ör. Library/Application Support, Library/pnpm) toplamlarını da önbelleğe yaz
+            let mut ancestor_sums: HashMap<PathBuf, u64> = HashMap::new();
+            for ((parent_idx, sub_path), size_opt) in tasks.into_iter().zip(measured) {
+                let sz = size_opt.unwrap_or(0);
+                totals[parent_idx] = totals[parent_idx].saturating_add(sz);
+                let norm_sub = normalize_path(&sub_path);
+                known_sizes.insert(norm_sub.clone(), sz);
+                if let Some(parent_dir) = norm_sub.parent() {
+                    let p_buf = parent_dir.to_path_buf();
+                    *ancestor_sums.entry(p_buf).or_insert(0) += sz;
+                }
+            }
+            for (anc, sum) in ancestor_sums {
+                known_sizes.entry(anc).or_insert(sum);
+            }
+        }
+
+        for (idx, (_, path, is_dir)) in items.iter().enumerate() {
+            if *is_dir {
+                known_sizes.insert(normalize_path(path), totals[idx]);
+            }
+        }
+
+        totals
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let results: Vec<Mutex<u64>> = (0..len).map(|_| Mutex::new(0)).collect();
+        let cursor = AtomicUsize::new(0);
+        let worker_count = len.clamp(1, MAX_SCAN_THREADS);
+
+        std::thread::scope(|scope| {
+            for _ in 0..worker_count {
+                let cursor_ref = &cursor;
+                let results_ref = &results;
+                scope.spawn(move || loop {
+                    let idx = cursor_ref.fetch_add(1, Ordering::Relaxed);
+                    if idx >= len {
+                        break;
+                    }
+                    let (_, ref path, is_dir) = items[idx];
+                    let size = if is_dir {
+                        measure_dir_size(path, include_protected)
+                    } else {
+                        fs::symlink_metadata(path).map(|m| m.len()).unwrap_or(0)
+                    };
+                    if let Ok(mut slot) = results_ref[idx].lock() {
+                        *slot = size;
+                    }
+                });
+            }
+        });
+
+        for (idx, m) in results.into_iter().enumerate() {
+            let sz = m.into_inner().unwrap_or(0);
+            totals[idx] = sz;
+            known_sizes.insert(normalize_path(&items[idx].1), sz);
+        }
+        totals
+    }
+}
+
+fn measure_paths_parallel(items: &[(String, PathBuf, bool)], include_protected: bool) -> Vec<u64> {
+    let mut ignored = HashMap::new();
+    measure_paths_parallel_with_cache(items, include_protected, &mut ignored)
 }
 
 fn measure_dirs_parallel_opt(paths: &[PathBuf]) -> Vec<Option<u64>> {
@@ -1022,7 +1183,8 @@ pub fn scan_disk_breakdown(
         }
     }
 
-    let sizes = measure_paths_parallel(&children, include_protected);
+    let mut known_sizes: HashMap<PathBuf, u64> = HashMap::new();
+    let sizes = measure_paths_parallel_with_cache(&children, include_protected, &mut known_sizes);
     let total_scanned_bytes: u64 = sizes
         .iter()
         .fold(0u64, |acc, &sz| acc.saturating_add(sz));
@@ -1091,7 +1253,6 @@ pub fn scan_disk_breakdown(
 
     let (disk_total_bytes, disk_used_bytes, disk_available_bytes) = read_primary_disk_space();
 
-    let mut known_sizes: HashMap<PathBuf, u64> = HashMap::new();
     for entry in &entries {
         known_sizes.insert(normalize_path(Path::new(&entry.path)), entry.size_bytes);
     }

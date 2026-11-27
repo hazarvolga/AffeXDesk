@@ -693,3 +693,83 @@ pub fn delete_client_project(state: State<'_, AppState>, id: i64) -> Result<bool
         .delete_client_project(id)
         .map_err(|err| format!("failed to delete client project: {err}"))
 }
+
+pub const FLOATING_HUD_LABEL: &str = "telemetry-hud";
+
+pub fn open_or_close_floating_hud(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+    if !enabled {
+        if let Some(win) = app.get_webview_window(FLOATING_HUD_LABEL) {
+            let _ = win.close();
+        }
+        return Ok(false);
+    }
+
+    if let Some(win) = app.get_webview_window(FLOATING_HUD_LABEL) {
+        let _ = win.show();
+        let _ = win.set_always_on_top(true);
+        return Ok(true);
+    }
+
+    let hud_width = 820.0_f64;
+    let hud_height = 38.0_f64;
+
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        FLOATING_HUD_LABEL,
+        WebviewUrl::App("index.html#hud".into()),
+    )
+    .title("AffeXDesk HUD")
+    .inner_size(hud_width, hud_height)
+    .decorations(false)
+    .resizable(false)
+    .always_on_top(true)
+    .visible_on_all_workspaces(true)
+    .skip_taskbar(true)
+    .focused(false);
+
+    if let Ok(Some(monitor)) = app.primary_monitor() {
+        let scale = monitor.scale_factor();
+        let screen_w = monitor.size().width as f64 / scale;
+        let x = ((screen_w - hud_width) / 2.0).max(16.0);
+        let y = if cfg!(target_os = "macos") { 34.0 } else { 10.0 };
+        builder = builder.position(x, y);
+    }
+
+    builder
+        .build()
+        .map_err(|err| format!("Üst telemetri bandı açılamadı: {err}"))?;
+
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn set_floating_hud(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<bool, String> {
+    let active = open_or_close_floating_hud(&app, enabled)?;
+    let _ = state
+        .db
+        .set_setting("floating_hud_enabled", if active { "true" } else { "false" });
+    Ok(active)
+}
+
+#[tauri::command]
+pub fn get_floating_hud_status(app: tauri::AppHandle) -> bool {
+    use tauri::Manager;
+    app.get_webview_window(FLOATING_HUD_LABEL).is_some()
+}
+
+#[tauri::command]
+pub fn focus_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+    Ok(())
+}

@@ -22,8 +22,21 @@ use db::{default_db_path, Database};
 pub fn run() {
     let db = Database::open(default_db_path()).expect("failed to initialize AffeXDesk database");
 
+    let auto_open_hud = db
+        .get_setting("floating_hud_enabled")
+        .ok()
+        .flatten()
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
     tauri::Builder::default()
         .manage(AppState { db })
+        .setup(move |app| {
+            if auto_open_hud {
+                let _ = commands::open_or_close_floating_hud(app.handle(), true);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::get_system_metrics,
@@ -77,6 +90,9 @@ pub fn run() {
             commands::list_client_projects,
             commands::save_client_project,
             commands::delete_client_project,
+            commands::set_floating_hud,
+            commands::get_floating_hud_status,
+            commands::focus_main_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AffeXDesk");

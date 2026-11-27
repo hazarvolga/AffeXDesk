@@ -11,6 +11,8 @@ import {
   HardDrive,
   LayoutDashboard,
   MemoryStick,
+  Pin,
+  PinOff,
   Settings,
   ShieldAlert,
   Sparkles,
@@ -98,6 +100,7 @@ export default function App() {
   const [processFilter, setProcessFilter] = useState<ProcessFilter>("all");
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>("all");
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
+  const [floatingHudOpen, setFloatingHudOpen] = useState(false);
 
   const [version, setVersion] = useState<string>("0.1.0");
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
@@ -540,6 +543,31 @@ export default function App() {
     settings.module_social_bridge === "true" ||
     Boolean(socialSnapshot?.connected);
 
+  const handleToggleFloatingHud = useCallback(async () => {
+    try {
+      const next = !floatingHudOpen;
+      const active = await api.setFloatingHud(next);
+      setFloatingHudOpen(active);
+      showToast(
+        "info",
+        active
+          ? "Üst telemetri bandı masaüstüne sabitlendi (sürükleyerek taşıyabilirsiniz)."
+          : "Üst telemetri bandı kapatıldı."
+      );
+    } catch (err) {
+      showToast("error", `Üst bant değiştirilemedi: ${String(err)}`);
+    }
+  }, [floatingHudOpen, showToast]);
+
+  useEffect(() => {
+    const mode = (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE;
+    if (mode === "test") return;
+    void api
+      .getFloatingHudStatus()
+      .then((active) => setFloatingHudOpen(Boolean(active)))
+      .catch(() => {});
+  }, []);
+
   const shellRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
@@ -690,6 +718,22 @@ export default function App() {
             );
           })}
         </nav>
+
+        <button
+          type="button"
+          className={`hud-pin-btn ${floatingHudOpen ? "hud-pin-btn--active" : ""}`}
+          onClick={() => void handleToggleFloatingHud()}
+          title="Masaüstünde her zaman en üstte görünen telemetri bandını aç/kapat"
+        >
+          {floatingHudOpen ? (
+            <PinOff size={14} className="text-emerald" />
+          ) : (
+            <Pin size={14} className="text-cyan" />
+          )}
+          <span className="nav-item__label">
+            {floatingHudOpen ? "Üst Bant: Açık" : "Üst Banda Sabitle"}
+          </span>
+        </button>
 
         <button
           type="button"

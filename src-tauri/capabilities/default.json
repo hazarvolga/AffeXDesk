@@ -1,9 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the main AffeXDesk window",
-  "windows": ["main"],
+  "description": "Default capability for the main AffeXDesk window and floating telemetry HUD",
+  "windows": ["main", "telemetry-hud"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging"
   ]
 }

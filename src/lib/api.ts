@@ -689,4 +689,16 @@ export const api = {
   deleteClientProject(id: number): Promise<boolean> {
     return invoke<boolean>("delete_client_project", { id });
   },
+
+  setFloatingHud(enabled: boolean): Promise<boolean> {
+    return invoke<boolean>("set_floating_hud", { enabled });
+  },
+
+  getFloatingHudStatus(): Promise<boolean> {
+    return invoke<boolean>("get_floating_hud_status");
+  },
+
+  focusMainWindow(): Promise<void> {
+    return invoke<void>("focus_main_window");
+  },
 };

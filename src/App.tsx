@@ -822,9 +822,12 @@ export default function App() {
           <ClientsView
             clients={clients}
             projects={clientProjects}
+            workspaces={workspaces}
             workspaceProjects={scanReport?.projects ?? []}
             onReloadClients={refreshClientsAndProjects}
             onRescanWorkspaces={refreshWorkspacesAndProjects}
+            onAddWorkspace={() => void handleAddWorkspace()}
+            onAssignProject={handleAssignProjectToClient}
             onConnectRemote={handleConnectRemoteClient}
             onOpenFinder={(p) => void handleOpenFinder(p)}
             onOpenIde={(p) => void handleOpenIde(p)}

@@ -7,6 +7,7 @@ import {
   Code2,
   ExternalLink,
   FolderOpen,
+  FolderPlus,
   GitBranch,
   Monitor,
   Pencil,
@@ -24,15 +25,19 @@ import {
   type ClientProjectRecord,
   type ClientRecord,
   type ProjectInfo,
+  type WorkspaceRecord,
 } from "../lib/api";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface ClientsViewProps {
   clients: ClientRecord[];
   projects: ClientProjectRecord[];
+  workspaces: WorkspaceRecord[];
   workspaceProjects: ProjectInfo[];
   onReloadClients: () => Promise<void>;
   onRescanWorkspaces: () => Promise<void>;
+  onAddWorkspace: () => void;
+  onAssignProject: (project: ProjectInfo, clientId: number | null) => Promise<void>;
   onConnectRemote: (client: ClientRecord) => Promise<void>;
   onOpenFinder: (path: string) => void;
   onOpenIde: (path: string) => void;
@@ -119,9 +124,12 @@ function formatShortDate(iso: string | null): string {
 export function ClientsView({
   clients,
   projects,
+  workspaces,
   workspaceProjects,
   onReloadClients,
   onRescanWorkspaces,
+  onAddWorkspace,
+  onAssignProject,
   onConnectRemote,
   onOpenFinder,
   onOpenIde,
@@ -140,6 +148,8 @@ export function ClientsView({
   // Forms
   const [clientFormOpen, setClientFormOpen] = useState(false);
   const [clientForm, setClientForm] = useState<ClientInput>(EMPTY_CLIENT_FORM);
+  const [pendingBindProject, setPendingBindProject] =
+    useState<ProjectInfo | null>(null);
   const [savingClient, setSavingClient] = useState(false);
 
   const [projectFormOpen, setProjectFormOpen] = useState(false);
@@ -271,6 +281,25 @@ export function ClientsView({
     }
   }, [onRescanWorkspaces, onReloadClients, onNotify]);
 
+  const assignedPaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of projects) {
+      if (p.local_path) set.add(p.local_path);
+    }
+    return set;
+  }, [projects]);
+
+  const unassignedWorkspaceProjects = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return workspaceProjects.filter((wp) => {
+      if (assignedPaths.has(wp.path)) return false;
+      if (!q) return true;
+      return `${wp.name} ${wp.workspace_label} ${wp.git_branch ?? ""} ${wp.path}`
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [workspaceProjects, assignedPaths, searchQuery]);
+
   const handleSaveClient = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -280,21 +309,26 @@ export function ClientsView({
       }
       setSavingClient(true);
       try {
-        await api.saveClient(clientForm);
-        onNotify(
-          "success",
-          clientForm.id ? "Müşteri güncellendi." : "Yeni müşteri eklendi."
-        );
+        const saved = await api.saveClient(clientForm);
+        if (pendingBindProject) {
+          await onAssignProject(pendingBindProject, saved.id);
+          setPendingBindProject(null);
+        } else {
+          onNotify(
+            "success",
+            clientForm.id ? "Müşteri güncellendi." : "Yeni müşteri eklendi."
+          );
+          await reloadAll();
+        }
         setClientFormOpen(false);
         setClientForm(EMPTY_CLIENT_FORM);
-        await reloadAll();
       } catch (err) {
         onNotify("error", `Müşteri kaydedilemedi: ${String(err)}`);
       } finally {
         setSavingClient(false);
       }
     },
-    [clientForm, onNotify, reloadAll]
+    [clientForm, pendingBindProject, onAssignProject, onNotify, reloadAll]
   );
 
   const handleSaveProject = useCallback(
@@ -565,13 +599,27 @@ export function ClientsView({
       {clientFormOpen && (
         <form className="panel client-form" onSubmit={(e) => void handleSaveClient(e)}>
           <div className="panel__head">
-            <h2 className="panel__title">
-              {clientForm.id ? "Müşteriyi Düzenle" : "Yeni Müşteri & Uzak Bağlantı"}
-            </h2>
+            <div>
+              <h2 className="panel__title">
+                {clientForm.id
+                  ? "Müşteriyi Düzenle"
+                  : pendingBindProject
+                  ? `Yeni Müşteri Oluştur & "${pendingBindProject.name}" Projesini Bağla`
+                  : "Yeni Müşteri & Uzak Bağlantı"}
+              </h2>
+              {pendingBindProject && (
+                <p className="view-subtitle mono">
+                  Otomatik bağlanacak klasör: {pendingBindProject.path}
+                </p>
+              )}
+            </div>
             <button
               type="button"
               className="icon-btn"
-              onClick={() => setClientFormOpen(false)}
+              onClick={() => {
+                setClientFormOpen(false);
+                setPendingBindProject(null);
+              }}
               aria-label="Formu kapat"
             >
               <X size={15} />
@@ -882,6 +930,7 @@ export function ClientsView({
 
       {/* SEKME 1: PROJE TAKİP PANOSU */}
       {subTab === "projects" && (
+        <>
         <section className="panel">
           <div className="panel__head">
             <div className="ai-filter-row">
@@ -1163,6 +1212,132 @@ export function ClientsView({
             </div>
           )}
         </section>
+
+        {/* İş Klasöründeki (dev/) Müşteri Atanmamış Projeler — Canlı Git ile Tek Tıkla Ata */}
+        <section className="panel" aria-label="İş Klasöründeki Projeler">
+          <div className="panel__head">
+            <div>
+              <h2 className="panel__title">
+                <GitBranch size={16} className="text-cyan" /> İş Klasöründeki
+                Projeler (Canlı Git · Müşteri Atanmamış)
+              </h2>
+              <p className="view-subtitle mono">
+                {workspaces.length > 0
+                  ? `Taranan kaynak: ${workspaces
+                      .map((w) => w.path)
+                      .join(", ")} · ${workspaceProjects.length} proje bulundu`
+                  : "Henüz bir dev/ iş klasörü tanımlanmamış — klasör ekleyerek Git projelerinizi otomatik tarayın."}
+              </p>
+            </div>
+            <div className="header-actions">
+              <span className="badge badge--info tabular">
+                {unassignedWorkspaceProjects.length} atanmamış
+              </span>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={onAddWorkspace}
+              >
+                <FolderPlus size={13} />
+                <span>İş Klasörü Ekle</span>
+              </button>
+            </div>
+          </div>
+
+          {unassignedWorkspaceProjects.length === 0 ? (
+            <div className="empty-inline">
+              {workspaces.length === 0
+                ? "Önce sağ üstteki 'İş Klasörü Ekle' butonuyla dev/ klasörünüzü seçin."
+                : "İş klasöründeki tüm projeler zaten bir müşteriye atanmış (veya arama filtresiyle eşleşen yok)."}
+            </div>
+          ) : (
+            <div className="cleaner-list">
+              {unassignedWorkspaceProjects.map((wp) => (
+                <div key={wp.path} className="ai-model-row">
+                  <div className="ai-model-row__info">
+                    <div className="cleaner-row__title-row">
+                      <strong className="cleaner-row__title truncate">
+                        {wp.name}
+                      </strong>
+                      <span className="badge badge--neutral">
+                        {wp.workspace_label}
+                      </span>
+                      {wp.git_branch && (
+                        <span className="badge badge--info mono">
+                          <GitBranch size={11} /> {wp.git_branch}
+                        </span>
+                      )}
+                      <span
+                        className={`badge tabular ${
+                          wp.git_dirty_count > 0
+                            ? "badge--warning"
+                            : "badge--success"
+                        }`}
+                      >
+                        {wp.git_dirty_count > 0
+                          ? `${wp.git_dirty_count} değişiklik`
+                          : "Git Temiz"}
+                      </span>
+                    </div>
+                    <span
+                      className="mono muted truncate"
+                      title={wp.git_last_commit || wp.path}
+                      style={{ fontSize: 11 }}
+                    >
+                      {wp.git_last_commit
+                        ? `${wp.git_last_commit} · ${wp.path}`
+                        : wp.path}
+                    </span>
+                  </div>
+
+                  <div className="ai-model-row__actions">
+                    {clients.length > 0 && (
+                      <select
+                        className="inline-select"
+                        defaultValue=""
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val) {
+                            void onAssignProject(wp, Number(val));
+                          }
+                        }}
+                        aria-label={`${wp.name} müşteri ata`}
+                      >
+                        <option value="">Müşteri Ata...</option>
+                        {clients.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn--primary btn--sm"
+                      onClick={() => {
+                        setPendingBindProject(wp);
+                        setClientForm(EMPTY_CLIENT_FORM);
+                        setClientFormOpen(true);
+                      }}
+                    >
+                      <Plus size={13} />
+                      <span>Müşteri Oluştur & Bağla</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => onOpenFinder(wp.path)}
+                      title="Finder'da Aç"
+                    >
+                      <FolderOpen size={13} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+        </>
       )}
 
       {/* SEKME 2: UZAK DESTEK & MÜŞTERİLER */}

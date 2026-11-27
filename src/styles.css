@@ -1243,3 +1243,84 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* === Process Owner Grouping === */
+.header-actions-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.process-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.process-group-card {
+  border-radius: 12px;
+  background: var(--surface, #121620);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+
+.process-group-card--zombie {
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.process-group-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+}
+
+.process-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+
+.process-group-title-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.process-group-name {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--fg, #f1f5f9);
+}
+
+.badge--accent {
+  background: rgba(56, 189, 248, 0.14);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.process-group-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.65rem 1rem 0.9rem 2.2rem;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.07));
+  background: rgba(0, 0, 0, 0.18);
+}

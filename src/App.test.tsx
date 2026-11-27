@@ -122,6 +122,8 @@ describe("App", () => {
     await screen.findByText("24.5%");
 
     fireEvent.keyDown(window, { key: "2", metaKey: true });
+    // Grouped by project/app by default; switch to Tekil PID to test per-PID SIGKILL dialog
+    fireEvent.click(await screen.findByRole("button", { name: /Tekil PID/i }));
     expect(await screen.findByText("vite")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Zorla Kapat/i }));

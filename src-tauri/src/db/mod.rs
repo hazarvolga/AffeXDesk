@@ -24,6 +24,61 @@ pub struct ProjectUrl {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClientRecord {
+    pub id: i64,
+    pub name: String,
+    pub contact_name: String,
+    pub contact_info: String,
+    pub remote_tool: String,
+    pub remote_id: String,
+    pub os_info: String,
+    pub notes: String,
+    pub last_connected_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientInput {
+    pub id: Option<i64>,
+    pub name: String,
+    pub contact_name: String,
+    pub contact_info: String,
+    pub remote_tool: String,
+    pub remote_id: String,
+    pub os_info: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ClientProjectRecord {
+    pub id: i64,
+    pub client_id: i64,
+    pub title: String,
+    pub status: String,
+    pub priority: String,
+    pub progress_pct: i64,
+    pub due_date: String,
+    pub local_path: String,
+    pub live_url: String,
+    pub notes: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientProjectInput {
+    pub id: Option<i64>,
+    pub client_id: i64,
+    pub title: String,
+    pub status: String,
+    pub priority: String,
+    pub progress_pct: i64,
+    pub due_date: String,
+    pub local_path: String,
+    pub live_url: String,
+    pub notes: String,
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -50,6 +105,7 @@ impl Database {
             "
             PRAGMA journal_mode = WAL;
             PRAGMA busy_timeout = 5000;
+            PRAGMA foreign_keys = ON;
 
             CREATE TABLE IF NOT EXISTS workspaces (
                 id INTEGER PRIMARY KEY,
@@ -67,6 +123,33 @@ impl Database {
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS clients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                contact_name TEXT NOT NULL DEFAULT '',
+                contact_info TEXT NOT NULL DEFAULT '',
+                remote_tool TEXT NOT NULL DEFAULT 'rustdesk',
+                remote_id TEXT NOT NULL DEFAULT '',
+                os_info TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                last_connected_at TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS client_projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                priority TEXT NOT NULL DEFAULT 'normal',
+                progress_pct INTEGER NOT NULL DEFAULT 0,
+                due_date TEXT NOT NULL DEFAULT '',
+                local_path TEXT NOT NULL DEFAULT '',
+                live_url TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
             );
             ",
         )?;
@@ -236,6 +319,228 @@ impl Database {
     pub fn delete_setting(&self, key: &str) -> Result<bool> {
         let conn = self.conn.lock().expect("database mutex poisoned");
         let affected = conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(affected > 0)
+    }
+
+    // --- Clients CRUD ---
+
+    pub fn list_clients(&self) -> Result<Vec<ClientRecord>> {
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, name, contact_name, contact_info, remote_tool, remote_id, os_info, notes, last_connected_at, created_at
+             FROM clients
+             ORDER BY COALESCE(last_connected_at, created_at) DESC, id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ClientRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                contact_name: row.get(2)?,
+                contact_info: row.get(3)?,
+                remote_tool: row.get(4)?,
+                remote_id: row.get(5)?,
+                os_info: row.get(6)?,
+                notes: row.get(7)?,
+                last_connected_at: row.get(8)?,
+                created_at: row.get(9)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn get_client(&self, id: i64) -> Result<Option<ClientRecord>> {
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        conn.query_row(
+            "SELECT id, name, contact_name, contact_info, remote_tool, remote_id, os_info, notes, last_connected_at, created_at
+             FROM clients WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ClientRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    contact_name: row.get(2)?,
+                    contact_info: row.get(3)?,
+                    remote_tool: row.get(4)?,
+                    remote_id: row.get(5)?,
+                    os_info: row.get(6)?,
+                    notes: row.get(7)?,
+                    last_connected_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    pub fn save_client(&self, input: &ClientInput) -> Result<ClientRecord> {
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        let now = Utc::now().to_rfc3339();
+        let name = input.name.trim();
+        let contact_name = input.contact_name.trim();
+        let contact_info = input.contact_info.trim();
+        let remote_tool = input.remote_tool.trim().to_ascii_lowercase();
+        let remote_id = input.remote_id.trim();
+        let os_info = input.os_info.trim();
+        let notes = input.notes.trim();
+
+        let id = if let Some(existing_id) = input.id {
+            conn.execute(
+                "UPDATE clients
+                 SET name = ?1, contact_name = ?2, contact_info = ?3, remote_tool = ?4, remote_id = ?5, os_info = ?6, notes = ?7
+                 WHERE id = ?8",
+                params![name, contact_name, contact_info, remote_tool, remote_id, os_info, notes, existing_id],
+            )?;
+            existing_id
+        } else {
+            conn.execute(
+                "INSERT INTO clients (name, contact_name, contact_info, remote_tool, remote_id, os_info, notes, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![name, contact_name, contact_info, remote_tool, remote_id, os_info, notes, now],
+            )?;
+            conn.last_insert_rowid()
+        };
+
+        conn.query_row(
+            "SELECT id, name, contact_name, contact_info, remote_tool, remote_id, os_info, notes, last_connected_at, created_at
+             FROM clients WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ClientRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    contact_name: row.get(2)?,
+                    contact_info: row.get(3)?,
+                    remote_tool: row.get(4)?,
+                    remote_id: row.get(5)?,
+                    os_info: row.get(6)?,
+                    notes: row.get(7)?,
+                    last_connected_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                })
+            },
+        )
+    }
+
+    pub fn touch_client_connected(&self, id: i64) -> Result<Option<String>> {
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        let now = Utc::now().to_rfc3339();
+        let affected = conn.execute(
+            "UPDATE clients SET last_connected_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(if affected > 0 { Some(now) } else { None })
+    }
+
+    pub fn delete_client(&self, id: i64) -> Result<bool> {
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        let affected = conn.execute("DELETE FROM clients WHERE id = ?1", params![id])?;
+        Ok(affected > 0)
+    }
+
+    // --- Client Projects CRUD ---
+
+    pub fn list_client_projects(&self) -> Result<Vec<ClientProjectRecord>> {
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, client_id, title, status, priority, progress_pct, due_date, local_path, live_url, notes, updated_at
+             FROM client_projects
+             ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ClientProjectRecord {
+                id: row.get(0)?,
+                client_id: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get(3)?,
+                priority: row.get(4)?,
+                progress_pct: row.get(5)?,
+                due_date: row.get(6)?,
+                local_path: row.get(7)?,
+                live_url: row.get(8)?,
+                notes: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn save_client_project(&self, input: &ClientProjectInput) -> Result<ClientProjectRecord> {
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        let now = Utc::now().to_rfc3339();
+        let title = input.title.trim();
+        let status = input.status.trim().to_ascii_lowercase();
+        let priority = input.priority.trim().to_ascii_lowercase();
+        let progress_pct = input.progress_pct.clamp(0, 100);
+        let due_date = input.due_date.trim();
+        let local_path = input.local_path.trim();
+        let live_url = input.live_url.trim();
+        let notes = input.notes.trim();
+
+        let id = if let Some(existing_id) = input.id {
+            conn.execute(
+                "UPDATE client_projects
+                 SET client_id = ?1, title = ?2, status = ?3, priority = ?4, progress_pct = ?5, due_date = ?6, local_path = ?7, live_url = ?8, notes = ?9, updated_at = ?10
+                 WHERE id = ?11",
+                params![
+                    input.client_id,
+                    title,
+                    status,
+                    priority,
+                    progress_pct,
+                    due_date,
+                    local_path,
+                    live_url,
+                    notes,
+                    now,
+                    existing_id
+                ],
+            )?;
+            existing_id
+        } else {
+            conn.execute(
+                "INSERT INTO client_projects (client_id, title, status, priority, progress_pct, due_date, local_path, live_url, notes, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    input.client_id,
+                    title,
+                    status,
+                    priority,
+                    progress_pct,
+                    due_date,
+                    local_path,
+                    live_url,
+                    notes,
+                    now
+                ],
+            )?;
+            conn.last_insert_rowid()
+        };
+
+        conn.query_row(
+            "SELECT id, client_id, title, status, priority, progress_pct, due_date, local_path, live_url, notes, updated_at
+             FROM client_projects WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ClientProjectRecord {
+                    id: row.get(0)?,
+                    client_id: row.get(1)?,
+                    title: row.get(2)?,
+                    status: row.get(3)?,
+                    priority: row.get(4)?,
+                    progress_pct: row.get(5)?,
+                    due_date: row.get(6)?,
+                    local_path: row.get(7)?,
+                    live_url: row.get(8)?,
+                    notes: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            },
+        )
+    }
+
+    pub fn delete_client_project(&self, id: i64) -> Result<bool> {
+        let conn = self.conn.lock().expect("database mutex poisoned");
+        let affected = conn.execute("DELETE FROM client_projects WHERE id = ?1", params![id])?;
         Ok(affected > 0)
     }
 }

@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   Sparkles,
   TerminalSquare,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -39,6 +40,7 @@ import {
   DiskAnalyzerView,
 } from "./components/DiskAnalyzerView";
 import { clearSmartCleanerUiCache } from "./components/SmartCleanerPanel";
+import { ClientsView } from "./components/ClientsView";
 import { GitView } from "./components/GitView";
 import { KnowledgeView } from "./components/KnowledgeView";
 import { StudioDevOpsView } from "./components/StudioDevOpsView";
@@ -61,15 +63,16 @@ const NAV_ITEMS: Array<{
   { id: "processes", label: "Süreçler", shortcut: "2", icon: Cpu },
   { id: "projects", label: "Projeler", shortcut: "3", icon: FolderGit2 },
   { id: "disk", label: "Disk Analizi", shortcut: "4", icon: HardDrive },
-  { id: "git", label: "Git / Repolar", shortcut: "5", icon: GitBranch },
-  { id: "knowledge", label: "Bilgi Bankası", shortcut: "6", icon: BookOpen },
+  { id: "clients", label: "Müşteriler & Destek", shortcut: "5", icon: Users },
+  { id: "git", label: "Git / Repolar", shortcut: "6", icon: GitBranch },
+  { id: "knowledge", label: "Bilgi Bankası", shortcut: "7", icon: BookOpen },
   {
     id: "studio",
     label: "Stüdyo & DevOps",
-    shortcut: "7",
+    shortcut: "8",
     icon: Clapperboard,
   },
-  { id: "settings", label: "Ayarlar", shortcut: "8", icon: Settings },
+  { id: "settings", label: "Ayarlar", shortcut: "9", icon: Settings },
 ];
 
 export default function App() {
@@ -217,10 +220,11 @@ export default function App() {
         "2": "processes",
         "3": "projects",
         "4": "disk",
-        "5": "git",
-        "6": "knowledge",
-        "7": "studio",
-        "8": "settings",
+        "5": "clients",
+        "6": "git",
+        "7": "knowledge",
+        "8": "studio",
+        "9": "settings",
       };
       const target = map[event.key];
       if (target) {
@@ -717,6 +721,15 @@ export default function App() {
           <DiskAnalyzerView
             onOpenFinder={(p) => void handleOpenFinder(p)}
             onRefreshTelemetry={refreshTelemetry}
+            onNotify={showToast}
+          />
+        )}
+
+        {activeTab === "clients" && (
+          <ClientsView
+            onOpenFinder={(p) => void handleOpenFinder(p)}
+            onOpenIde={(p) => void handleOpenIde(p)}
+            onOpenUrl={(u) => void handleOpenUrl(u)}
             onNotify={showToast}
           />
         )}

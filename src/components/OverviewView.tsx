@@ -34,6 +34,7 @@ export type NavTab =
   | "processes"
   | "projects"
   | "disk"
+  | "clients"
   | "git"
   | "knowledge"
   | "studio"

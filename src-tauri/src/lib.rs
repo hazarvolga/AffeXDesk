@@ -1,5 +1,6 @@
 pub mod ai_copilot;
 pub mod cleaner;
+pub mod clients;
 pub mod commands;
 pub mod db;
 pub mod devops;
@@ -69,6 +70,13 @@ pub fn run() {
             commands::scan_system_cleaner,
             commands::run_system_cleaner,
             commands::restart_docker_desktop,
+            commands::list_clients,
+            commands::save_client,
+            commands::delete_client,
+            commands::connect_remote_client,
+            commands::list_client_projects,
+            commands::save_client_project,
+            commands::delete_client_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AffeXDesk");

@@ -354,6 +354,74 @@ export interface CleanerRunReport {
   results: CleanerRunItemResult[];
 }
 
+export type RemoteTool =
+  | "rustdesk"
+  | "hoptodesk"
+  | "anydesk"
+  | "vnc"
+  | "rdp"
+  | "ssh";
+
+export interface ClientRecord {
+  id: number;
+  name: string;
+  contact_name: string;
+  contact_info: string;
+  remote_tool: RemoteTool | string;
+  remote_id: string;
+  os_info: string;
+  notes: string;
+  last_connected_at: string | null;
+  created_at: string;
+}
+
+export interface ClientInput {
+  id?: number | null;
+  name: string;
+  contact_name: string;
+  contact_info: string;
+  remote_tool: string;
+  remote_id: string;
+  os_info: string;
+  notes: string;
+}
+
+export type ClientProjectStatus =
+  | "lead"
+  | "active"
+  | "waiting"
+  | "review"
+  | "done";
+
+export type ClientProjectPriority = "low" | "normal" | "high" | "urgent";
+
+export interface ClientProjectRecord {
+  id: number;
+  client_id: number;
+  title: string;
+  status: ClientProjectStatus | string;
+  priority: ClientProjectPriority | string;
+  progress_pct: number;
+  due_date: string;
+  local_path: string;
+  live_url: string;
+  notes: string;
+  updated_at: string;
+}
+
+export interface ClientProjectInput {
+  id?: number | null;
+  client_id: number;
+  title: string;
+  status: string;
+  priority: string;
+  progress_pct: number;
+  due_date: string;
+  local_path: string;
+  live_url: string;
+  notes: string;
+}
+
 export const api = {
   appVersion(): Promise<string> {
     return invoke<string>("app_version");
@@ -592,5 +660,33 @@ export const api = {
 
   restartDockerDesktop(): Promise<void> {
     return invoke<void>("restart_docker_desktop");
+  },
+
+  listClients(): Promise<ClientRecord[]> {
+    return invoke<ClientRecord[]>("list_clients");
+  },
+
+  saveClient(input: ClientInput): Promise<ClientRecord> {
+    return invoke<ClientRecord>("save_client", { input });
+  },
+
+  deleteClient(id: number): Promise<boolean> {
+    return invoke<boolean>("delete_client", { id });
+  },
+
+  connectRemoteClient(id: number): Promise<string> {
+    return invoke<string>("connect_remote_client", { id });
+  },
+
+  listClientProjects(): Promise<ClientProjectRecord[]> {
+    return invoke<ClientProjectRecord[]>("list_client_projects");
+  },
+
+  saveClientProject(input: ClientProjectInput): Promise<ClientProjectRecord> {
+    return invoke<ClientProjectRecord>("save_client_project", { input });
+  },
+
+  deleteClientProject(id: number): Promise<boolean> {
+    return invoke<boolean>("delete_client_project", { id });
   },
 };

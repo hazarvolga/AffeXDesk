@@ -4,6 +4,7 @@ use tauri::State;
 
 use crate::ai_copilot;
 use crate::cleaner;
+use crate::clients;
 use crate::db::{self, Database};
 use crate::devops;
 use crate::disk_analyzer;
@@ -550,4 +551,87 @@ pub async fn restart_docker_desktop() -> Result<(), String> {
     tokio::task::spawn_blocking(cleaner::restart_docker_desktop)
         .await
         .map_err(|err| format!("restart docker desktop failed: {err}"))?
+}
+
+#[tauri::command]
+pub fn list_clients(state: State<'_, AppState>) -> Result<Vec<db::ClientRecord>, String> {
+    state
+        .db
+        .list_clients()
+        .map_err(|err| format!("failed to list clients: {err}"))
+}
+
+#[tauri::command]
+pub fn save_client(
+    state: State<'_, AppState>,
+    input: db::ClientInput,
+) -> Result<db::ClientRecord, String> {
+    if input.name.trim().is_empty() {
+        return Err("Müşteri / firma adı boş olamaz.".to_string());
+    }
+    state
+        .db
+        .save_client(&input)
+        .map_err(|err| format!("failed to save client: {err}"))
+}
+
+#[tauri::command]
+pub fn delete_client(state: State<'_, AppState>, id: i64) -> Result<bool, String> {
+    state
+        .db
+        .delete_client(id)
+        .map_err(|err| format!("failed to delete client: {err}"))
+}
+
+#[tauri::command]
+pub async fn connect_remote_client(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<String, String> {
+    let client = state
+        .db
+        .get_client(id)
+        .map_err(|err| format!("failed to load client: {err}"))?
+        .ok_or_else(|| "Müşteri bulunamadı.".to_string())?;
+
+    let uri = clients::build_remote_uri(&client.remote_tool, &client.remote_id)?;
+    let uri_clone = uri.clone();
+    tokio::task::spawn_blocking(move || clients::launch_remote_uri(&uri_clone))
+        .await
+        .map_err(|err| format!("remote launch task failed: {err}"))??;
+
+    let _ = state.db.touch_client_connected(id);
+    Ok(uri)
+}
+
+#[tauri::command]
+pub fn list_client_projects(
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ClientProjectRecord>, String> {
+    state
+        .db
+        .list_client_projects()
+        .map_err(|err| format!("failed to list client projects: {err}"))
+}
+
+#[tauri::command]
+pub fn save_client_project(
+    state: State<'_, AppState>,
+    input: db::ClientProjectInput,
+) -> Result<db::ClientProjectRecord, String> {
+    if input.title.trim().is_empty() {
+        return Err("Proje adı boş olamaz.".to_string());
+    }
+    state
+        .db
+        .save_client_project(&input)
+        .map_err(|err| format!("failed to save client project: {err}"))
+}
+
+#[tauri::command]
+pub fn delete_client_project(state: State<'_, AppState>, id: i64) -> Result<bool, String> {
+    state
+        .db
+        .delete_client_project(id)
+        .map_err(|err| format!("failed to delete client project: {err}"))
 }

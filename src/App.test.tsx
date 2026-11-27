@@ -51,6 +51,13 @@ vi.mock("./lib/api", () => ({
     scanSystemCleaner: vi.fn(),
     runSystemCleaner: vi.fn(),
     restartDockerDesktop: vi.fn(),
+    listClients: vi.fn(),
+    saveClient: vi.fn(),
+    deleteClient: vi.fn(),
+    connectRemoteClient: vi.fn(),
+    listClientProjects: vi.fn(),
+    saveClientProject: vi.fn(),
+    deleteClientProject: vi.fn(),
   },
 }));
 
@@ -184,6 +191,8 @@ describe("App", () => {
       results: [],
     });
     mockedApi.restartDockerDesktop.mockResolvedValue();
+    mockedApi.listClients.mockResolvedValue([]);
+    mockedApi.listClientProjects.mockResolvedValue([]);
     mockedApi.scanCreativeCaches.mockResolvedValue([]);
     mockedApi.scanLocalAiModels.mockResolvedValue([]);
     mockedApi.inspectDocker.mockResolvedValue({
@@ -276,20 +285,28 @@ describe("App", () => {
 
     fireEvent.keyDown(window, { key: "5", metaKey: true });
     expect(
+      await screen.findByRole("heading", {
+        level: 1,
+        name: /Müşteriler & Uzak Destek/i,
+      })
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "6", metaKey: true });
+    expect(
       await screen.findByRole("heading", { name: /Git & Uzak Repolar/i })
     ).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "6", altKey: true });
+    fireEvent.keyDown(window, { key: "7", altKey: true });
     expect(
       await screen.findByRole("heading", { level: 1, name: /Bilgi Bankası/i })
     ).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "7", metaKey: true });
+    fireEvent.keyDown(window, { key: "8", metaKey: true });
     expect(
       await screen.findByRole("heading", { level: 1, name: /Stüdyo & DevOps/i })
     ).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "8", metaKey: true });
+    fireEvent.keyDown(window, { key: "9", metaKey: true });
     expect(
       screen.getByRole("heading", { name: /Ayarlar/i })
     ).toBeInTheDocument();

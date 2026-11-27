@@ -30,6 +30,7 @@ import {
   type UptimeResult,
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
 export interface ProjectDetailViewProps {
   project: ProjectInfo;
@@ -88,6 +89,7 @@ export function ProjectDetailView({
   onRequestClean,
   onNotify,
 }: ProjectDetailViewProps) {
+  const { t } = useI18n();
   const [audit, setAudit] = useState<ProjectAuditReport | null>(null);
   const [rulesConfig, setRulesConfig] = useState<DevOpsRulesConfig>({
     disabled_builtin_ids: [],
@@ -261,7 +263,7 @@ export function ProjectDetailView({
             style={{ marginBottom: 8 }}
           >
             <ArrowLeft size={13} />
-            <span>Proje Radarına Dön</span>
+            <span>{t("projects.back_radar")}</span>
           </button>
           <div className="project-card__title-wrap">
             <h1 className="view-title">{project.name}</h1>
@@ -309,17 +311,17 @@ export function ProjectDetailView({
             disabled={loading}
           >
             <RefreshCw size={13} className={loading ? "spin" : ""} />
-            <span>Yeniden Denetle</span>
+            <span>{t("projects.reaudit")}</span>
           </button>
         </div>
       </header>
 
       {/* Üst KPI & Sağlık Puanı Şeridi */}
-      <section className="metric-grid" aria-label="Proje Sağlık Özeti">
+      <section className="metric-grid" aria-label={t("projects.devops_score")}>
         <article className="metric-card">
           <div className="metric-card__head">
             <span className="metric-card__label">
-              <ShieldCheck size={15} className="text-emerald" /> DevOps / WebDev Skoru
+              <ShieldCheck size={15} className="text-emerald" /> {t("projects.devops_score")}
             </span>
             {audit && (
               <span
@@ -331,7 +333,7 @@ export function ProjectDetailView({
                     : "badge--warning"
                 }`}
               >
-                Not: {audit.grade}
+                {t("projects.grade")}: {audit.grade}
               </span>
             )}
           </div>
@@ -445,10 +447,10 @@ export function ProjectDetailView({
         <div className="panel__head">
           <div>
             <h2 className="panel__title">
-              <Wrench size={15} className="text-cyan" /> DevOps & WebDev Kural Kütüphanesi
+              <Wrench size={15} className="text-cyan" /> {t("projects.rule_library")}
             </h2>
             <p className="view-subtitle">
-              Çalışma disiplininize göre yerleşik kuralları açıp kapatabilir veya kendi özel kurallarınızı ekleyebilirsiniz.
+              {t("projects.rule_subtitle")}
             </p>
           </div>
           <div className="header-actions">
@@ -458,7 +460,7 @@ export function ProjectDetailView({
               onClick={() => setEditorOpen((prev) => !prev)}
             >
               <SlidersHorizontal size={13} />
-              <span>{editorOpen ? "Düzenlemeyi Kapat" : "Kuralları Düzenle"}</span>
+              <span>{editorOpen ? t("projects.close_editor") : t("projects.edit_rules")}</span>
             </button>
           </div>
         </div>

@@ -21,6 +21,7 @@ import {
   type CleanerScanReport,
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface SmartCleanerPanelProps {
@@ -60,6 +61,7 @@ export function SmartCleanerPanel({
   onNotify,
   onCleaned,
 }: SmartCleanerPanelProps) {
+  const { t } = useI18n();
   const [report, setReport] = useState<CleanerScanReport | null>(
     () => cachedCleanerReport
   );
@@ -346,7 +348,7 @@ export function SmartCleanerPanel({
         <article className="metric-card">
           <div className="metric-card__head">
             <span className="metric-card__label">
-              <Sparkles size={15} className="text-cyan" /> Toplam Geri Kazanılabilir
+              <Sparkles size={15} className="text-cyan" /> {t("cleaner.total_reclaimable")}
             </span>
             <span className="badge badge--info">
               {report ? `${report.items.length} kalem` : "—"}
@@ -363,9 +365,9 @@ export function SmartCleanerPanel({
         <article className="metric-card">
           <div className="metric-card__head">
             <span className="metric-card__label">
-              <ShieldCheck size={15} className="text-emerald" /> Tam Güvenli Alan
+              <ShieldCheck size={15} className="text-emerald" /> {t("cleaner.safe_space")}
             </span>
-            <span className="badge badge--success">Veri Kaybı Sıfır</span>
+            <span className="badge badge--success">{t("cleaner.zero_data_loss")}</span>
           </div>
           <div className="metric-card__value tabular text-emerald">
             {report ? formatBytes(report.safe_reclaimable_bytes) : "—"}
@@ -378,7 +380,7 @@ export function SmartCleanerPanel({
         <article className="metric-card">
           <div className="metric-card__head">
             <span className="metric-card__label">
-              <Trash2 size={15} className="text-warning" /> Seçili Temizlik
+              <Trash2 size={15} className="text-warning" /> {t("cleaner.selected_clean")}
             </span>
             <span className="badge badge--neutral tabular">
               {selectedIds.length} seçili
@@ -397,8 +399,8 @@ export function SmartCleanerPanel({
               <Trash2 size={13} />
               <span>
                 {cleaning
-                  ? "Temizleniyor..."
-                  : `Seçilenleri Temizle (${formatBytes(selectedBytes)})`}
+                  ? t("disk.scanning")
+                  : `${t("cleaner.clean_selected")} (${formatBytes(selectedBytes)})`}
               </span>
             </button>
           </div>

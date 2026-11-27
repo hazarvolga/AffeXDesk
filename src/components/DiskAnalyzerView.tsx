@@ -29,6 +29,7 @@ import {
   clearSmartCleanerUiCache,
   SmartCleanerPanel,
 } from "./SmartCleanerPanel";
+import { useI18n } from "../lib/i18n";
 
 export interface DiskAnalyzerViewProps {
   onOpenFinder: (path: string) => void;
@@ -608,19 +609,20 @@ export function DiskAnalyzerView({
     return all.filter((entry) => entry.category === selectedCategory);
   }, [report, selectedCategory]);
 
+  const { t, lang } = useI18n();
   const formattedScanTime = useMemo(() => formatScanTime(scannedAt), [scannedAt]);
 
   return (
     <div className="view-stack">
       <header className="view-header">
         <div>
-          <h1 className="view-title">Disk Analizi</h1>
+          <h1 className="view-title">{t("disk.title")}</h1>
           <p className="view-subtitle">
             {report
-              ? `${report.root_path} · Taranan: ${formatBytes(
+              ? `${report.root_path} · ${lang === "en" ? "Scanned" : "Taranan"}: ${formatBytes(
                   report.total_scanned_bytes
-                )}${formattedScanTime ? ` · Son tarama: ${formattedScanTime}` : ""}`
-              : "Disk doluluğunu kategorilere ayırın, klasörlerin içine girin ve güvenle Çöp Sepetine taşıyın"}
+                )}${formattedScanTime ? ` · ${lang === "en" ? "Last scan" : "Son tarama"}: ${formattedScanTime}` : ""}`
+              : t("disk.subtitle")}
           </p>
         </div>
         {subTab === "map" && (
@@ -630,11 +632,17 @@ export function DiskAnalyzerView({
               className={`btn ${fullDiskMode ? "btn--primary" : "btn--ghost"}`}
               onClick={handleToggleFullDiskMode}
               disabled={loading}
-              title="Movies, Downloads, Documents, Desktop, .Trash ve /Applications dahil tüm diski tara"
+              title="Movies, Downloads, Documents, Desktop, .Trash & /Applications"
             >
               {fullDiskMode ? <ShieldCheck size={14} /> : <Lock size={14} />}
               <span>
-                {fullDiskMode ? "Tam Disk Modu: Açık" : "Tam Disk Modu (Tümü)"}
+                {fullDiskMode
+                  ? lang === "en"
+                    ? "Full Disk Mode: ON"
+                    : "Tam Disk Modu: Açık"
+                  : lang === "en"
+                  ? "Full Disk Mode (All)"
+                  : "Tam Disk Modu (Tümü)"}
               </span>
             </button>
             <button
@@ -644,7 +652,15 @@ export function DiskAnalyzerView({
               disabled={currentDir === null}
             >
               <Home size={14} />
-              <span>{currentDir !== null ? "← Ev Dizinine Dön" : "Ev Dizini"}</span>
+              <span>
+                {currentDir !== null
+                  ? lang === "en"
+                    ? "← Back to Home"
+                    : "← Ev Dizinine Dön"
+                  : lang === "en"
+                  ? "Home Directory"
+                  : "Ev Dizini"}
+              </span>
             </button>
             <button
               type="button"
@@ -653,13 +669,13 @@ export function DiskAnalyzerView({
               disabled={loading}
             >
               <RefreshCw size={15} className={loading ? "spin" : ""} />
-              <span>{loading ? "Taranıyor..." : "Yeniden Tara"}</span>
+              <span>{loading ? t("disk.scanning") : t("disk.rescan")}</span>
             </button>
           </div>
         )}
       </header>
 
-      <div className="subtabs-bar" role="tablist" aria-label="Disk Analizi Sekmeleri">
+      <div className="subtabs-bar" role="tablist" aria-label={t("disk.title")}>
         <button
           type="button"
           role="tab"
@@ -673,7 +689,7 @@ export function DiskAnalyzerView({
           }}
         >
           <PieChart size={14} />
-          <span>Disk Haritası & Gezgin</span>
+          <span>{t("disk.tab_map")}</span>
         </button>
         <button
           type="button"
@@ -683,7 +699,7 @@ export function DiskAnalyzerView({
           onClick={() => setSubTab("cleaner")}
         >
           <Sparkles size={14} />
-          <span>Akıllı Temizleyici</span>
+          <span>{t("disk.tab_cleaner")}</span>
         </button>
       </div>
 

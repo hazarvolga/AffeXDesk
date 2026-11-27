@@ -12,8 +12,10 @@ import {
 } from "lucide-react";
 import { api, type SystemMetrics } from "../lib/api";
 import { formatBytes, formatPct } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
 export function FloatingHudBar() {
+  const { t } = useI18n();
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
 
   useEffect(() => {
@@ -124,7 +126,7 @@ export function FloatingHudBar() {
 
       <div className="floating-hud__item" data-tauri-drag-region>
         <HardDrive size={13} className="text-emerald" />
-        <span className="telemetry-ribbon__label">DİSK</span>
+        <span className="telemetry-ribbon__label">{t("telem.disk")}</span>
         <strong className="telemetry-ribbon__value tabular">
           {metrics ? formatPct(diskPct) : "—"}
         </strong>
@@ -141,7 +143,9 @@ export function FloatingHudBar() {
           />
         </span>
         <span className="telemetry-ribbon__meta tabular">
-          {metrics ? `${formatBytes(metrics.disk_available_bytes)} boş` : ""}
+          {metrics
+            ? `${formatBytes(metrics.disk_available_bytes)} ${t("telem.disk_free")}`
+            : ""}
         </span>
       </div>
 
@@ -160,7 +164,7 @@ export function FloatingHudBar() {
               : "muted"
           }
         />
-        <span className="telemetry-ribbon__label">TERMAL</span>
+        <span className="telemetry-ribbon__label">{t("telem.thermal")}</span>
         <strong className="telemetry-ribbon__value tabular">
           {metrics && metrics.temperature_c !== null
             ? `${Math.round(metrics.temperature_c)}°C`
@@ -178,12 +182,12 @@ export function FloatingHudBar() {
           }`}
         >
           {metrics?.thermal_state === "critical"
-            ? "Kritik"
+            ? t("telem.critical")
             : metrics?.thermal_state === "serious"
-            ? "Yüksek"
+            ? t("telem.serious")
             : metrics?.thermal_state === "fair"
-            ? "Ilık"
-            : "Nominal"}
+            ? t("telem.fair")
+            : t("telem.nominal")}
         </span>
       </div>
 

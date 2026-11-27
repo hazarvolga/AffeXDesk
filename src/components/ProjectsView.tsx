@@ -23,6 +23,7 @@ import type {
   WorkspaceScanReport,
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ProjectDetailView } from "./ProjectDetailView";
 import type { ProjectFilter } from "./OverviewView";
@@ -49,11 +50,11 @@ export interface ProjectsViewProps {
   onNotify?: (tone: "success" | "error" | "info", text: string) => void;
 }
 
-const PROJECT_FILTERS: Array<{ id: ProjectFilter; label: string }> = [
-  { id: "all", label: "Tümü" },
-  { id: "dirty", label: "Kirli Git" },
-  { id: "bloated", label: "Şişkin Disk" },
-  { id: "live", label: "Canlı URL" },
+const PROJECT_FILTERS: Array<{ id: ProjectFilter; labelKey: string }> = [
+  { id: "all", labelKey: "projects.filter_all" },
+  { id: "dirty", labelKey: "projects.filter_dirty" },
+  { id: "bloated", labelKey: "projects.filter_bloated" },
+  { id: "live", labelKey: "projects.filter_live" },
 ];
 
 export function ProjectsView({
@@ -77,6 +78,7 @@ export function ProjectsView({
   onOpenUrl,
   onNotify,
 }: ProjectsViewProps) {
+  const { t, lang } = useI18n();
   const [search, setSearch] = useState("");
   const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
     null
@@ -213,12 +215,12 @@ export function ProjectsView({
     <div className="view-stack">
       <header className="view-header">
         <div>
-          <h1 className="view-title">Proje Radarı</h1>
+          <h1 className="view-title">{t("projects.title")}</h1>
           <p className="view-subtitle tabular">
-            {scanReport?.total_projects ?? 0} proje ·{" "}
-            {scanReport?.dirty_projects ?? 0} kirli Git ·{" "}
-            {formatBytes(scanReport?.total_reclaimable_bytes ?? 0)} geri
-            kazanılabilir
+            {scanReport?.total_projects ?? 0} {lang === "en" ? "projects" : "proje"} ·{" "}
+            {scanReport?.dirty_projects ?? 0} {t("projects.filter_dirty")} ·{" "}
+            {formatBytes(scanReport?.total_reclaimable_bytes ?? 0)}{" "}
+            {lang === "en" ? "reclaimable" : "geri kazanılabilir"}
           </p>
         </div>
         <div className="header-actions">
@@ -229,7 +231,7 @@ export function ProjectsView({
             disabled={checkingUptime}
           >
             <Globe size={15} className={checkingUptime ? "spin" : ""} />
-            <span>Canlı URL&apos;leri Kontrol Et</span>
+            <span>{t("projects.check_urls")}</span>
           </button>
           <button
             type="button"
@@ -238,7 +240,7 @@ export function ProjectsView({
             disabled={loading}
           >
             <RefreshCw size={15} className={loading ? "spin" : ""} />
-            <span>Yenile</span>
+            <span>{t("telem.refresh")}</span>
           </button>
           <button
             type="button"
@@ -246,13 +248,13 @@ export function ProjectsView({
             onClick={onAddWorkspace}
           >
             <FolderPlus size={15} />
-            <span>+ İş Klasörü Ekle</span>
+            <span>{t("projects.add_workspace")}</span>
           </button>
         </div>
       </header>
 
       <div className="toolbar">
-        <div className="filter-pills" role="tablist" aria-label="Proje Filtreleri">
+        <div className="filter-pills" role="tablist" aria-label={t("projects.title")}>
           {PROJECT_FILTERS.map((opt) => (
             <button
               key={opt.id}
@@ -262,7 +264,7 @@ export function ProjectsView({
               className={`pill ${filter === opt.id ? "pill--active" : ""}`}
               onClick={() => onFilterChange(opt.id)}
             >
-              {opt.label}
+              {t(opt.labelKey)}
             </button>
           ))}
         </div>
@@ -273,8 +275,8 @@ export function ProjectsView({
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Proje, teknoloji veya Git dalı ara..."
-            aria-label="Proje ara"
+            placeholder={t("projects.search_placeholder")}
+            aria-label={t("projects.search_placeholder")}
           />
         </label>
       </div>
@@ -540,7 +542,7 @@ export function ProjectsView({
                     style={{ marginLeft: "auto" }}
                     onClick={() => setSelectedProjectPath(proj.path)}
                   >
-                    <span>Detay →</span>
+                    <span>{t("projects.detail_btn")}</span>
                   </button>
                 </div>
               </article>

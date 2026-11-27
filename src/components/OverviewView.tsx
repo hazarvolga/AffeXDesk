@@ -28,6 +28,7 @@ import {
   formatUptime,
 } from "../lib/format";
 import { resolveProcessOwner } from "./ProcessesView";
+import { useI18n } from "../lib/i18n";
 
 export type NavTab =
   | "overview"
@@ -68,27 +69,33 @@ export interface OverviewViewProps {
   ) => void;
 }
 
-function pressureLabel(pressure: string): { text: string; tone: string } {
+function pressureLabel(
+  pressure: string,
+  t: (key: string) => string
+): { text: string; tone: string } {
   switch (pressure) {
     case "critical":
-      return { text: "Kritik", tone: "danger" };
+      return { text: t("telem.critical"), tone: "danger" };
     case "warn":
-      return { text: "Yüksek", tone: "warning" };
+      return { text: t("telem.serious"), tone: "warning" };
     default:
-      return { text: "Normal", tone: "success" };
+      return { text: t("telem.normal"), tone: "success" };
   }
 }
 
-function thermalLabel(state: string): { text: string; tone: string } {
+function thermalLabel(
+  state: string,
+  t: (key: string) => string
+): { text: string; tone: string } {
   switch (state) {
     case "critical":
-      return { text: "Kritik", tone: "danger" };
+      return { text: t("telem.critical"), tone: "danger" };
     case "serious":
-      return { text: "Yüksek", tone: "warning" };
+      return { text: t("telem.serious"), tone: "warning" };
     case "fair":
-      return { text: "Ilık", tone: "info" };
+      return { text: t("telem.fair"), tone: "info" };
     default:
-      return { text: "Nominal", tone: "success" };
+      return { text: t("telem.nominal"), tone: "success" };
   }
 }
 
@@ -107,6 +114,7 @@ export function OverviewView({
   onAddWorkspace,
   onNavigate,
 }: OverviewViewProps) {
+  const { t, lang } = useI18n();
   const offlineSitesCount = Object.values(uptimeMap).filter(
     (u) => u.state === "down" || u.state === "degraded"
   ).length;
@@ -120,8 +128,8 @@ export function OverviewView({
     .sort((a, b) => b.reclaimable_bytes - a.reclaimable_bytes)
     .slice(0, 5);
 
-  const memPressure = pressureLabel(metrics?.mem_pressure ?? "normal");
-  const thermal = thermalLabel(metrics?.thermal_state ?? "nominal");
+  const memPressure = pressureLabel(metrics?.mem_pressure ?? "normal", t);
+  const thermal = thermalLabel(metrics?.thermal_state ?? "nominal", t);
 
   const diskUsedBytes = metrics
     ? Math.max(0, metrics.disk_total_bytes - metrics.disk_available_bytes)
@@ -131,10 +139,12 @@ export function OverviewView({
     <div className="view-stack">
       <header className="view-header">
         <div>
-          <h1 className="view-title">Komuta Merkezi</h1>
+          <h1 className="view-title">{t("overview.title")}</h1>
           <p className="view-subtitle">
             {metrics
               ? `${metrics.hostname} · ${metrics.os_name} · ${metrics.cpu_brand}`
+              : lang === "en"
+              ? "Hardware telemetry & developer environment status"
               : "Donanım telemetrisi ve geliştirici ortamı durumu"}
           </p>
         </div>
@@ -145,7 +155,7 @@ export function OverviewView({
           disabled={loading}
         >
           <RefreshCw size={15} className={loading ? "spin" : ""} />
-          <span>Yenile</span>
+          <span>{t("telem.refresh")}</span>
         </button>
       </header>
 
@@ -154,10 +164,10 @@ export function OverviewView({
         <article className="metric-card">
           <div className="metric-card__head">
             <span className="metric-card__label">
-              <Cpu size={15} /> CPU Kullanımı
+              <Cpu size={15} /> {t("overview.cpu_usage")}
             </span>
             <span className="badge badge--neutral">
-              {metrics ? `${metrics.cpu_cores} çekirdek` : "—"}
+              {metrics ? `${metrics.cpu_cores} ${t("telem.cores")}` : "—"}
             </span>
           </div>
           <div className="metric-card__value tabular">
@@ -215,15 +225,15 @@ export function OverviewView({
           type="button"
           className="metric-card metric-card--interactive"
           onClick={() => onNavigate("disk")}
-          aria-label="Disk Doluluk — Detaylı Analiz"
+          aria-label={`${t("overview.disk_usage")} — ${t("telem.detailed_analysis").replace(" →", "")}`}
         >
           <div className="metric-card__head">
             <span className="metric-card__label">
-              <HardDrive size={15} /> Disk Doluluk
+              <HardDrive size={15} /> {t("overview.disk_usage")}
             </span>
             <span className="badge badge--neutral tabular">
               {metrics
-                ? `${formatBytes(metrics.disk_available_bytes)} boş`
+                ? `${formatBytes(metrics.disk_available_bytes)} ${t("telem.disk_free")}`
                 : "—"}
             </span>
           </div>
@@ -246,16 +256,16 @@ export function OverviewView({
                 ? `${formatBytes(diskUsedBytes)} / ${formatBytes(
                     metrics.disk_total_bytes
                   )}`
-                : "Disk taranıyor..."}
+                : "—"}
             </p>
-            <span className="metric-card__cta">Detaylı Analiz →</span>
+            <span className="metric-card__cta">{t("telem.detailed_analysis")}</span>
           </div>
         </button>
 
         <article className="metric-card">
           <div className="metric-card__head">
             <span className="metric-card__label">
-              <Flame size={15} /> Termal &amp; GPU
+              <Flame size={15} /> {t("overview.thermal_gpu")}
             </span>
             <span className={`badge badge--${thermal.tone}`}>
               {thermal.text}
@@ -267,10 +277,10 @@ export function OverviewView({
               : thermal.text}
           </div>
           <p className="metric-card__meta truncate">
-            {metrics?.gpu_label || "GPU bilgisi"}
+            {metrics?.gpu_label || "GPU"}
           </p>
           <p className="metric-card__meta tabular">
-            Çalışma süresi: {metrics ? formatUptime(metrics.uptime_secs) : "—"}
+            {t("telem.uptime")}: {metrics ? formatUptime(metrics.uptime_secs) : "—"}
           </p>
         </article>
       </section>
@@ -290,9 +300,9 @@ export function OverviewView({
             <Zap size={16} />
           </div>
           <div className="ops-tile__body">
-            <span className="ops-tile__label">Zombi Dev Süreçleri</span>
+            <span className="ops-tile__label">{t("overview.zombie_procs")}</span>
             <strong className="ops-tile__value tabular">
-              {processes?.zombie_count ?? 0} süreç ·{" "}
+              {processes?.zombie_count ?? 0} {lang === "en" ? "proc" : "süreç"} ·{" "}
               {formatBytes(processes?.zombie_memory_bytes ?? 0)}
             </strong>
           </div>
@@ -313,7 +323,7 @@ export function OverviewView({
             <Trash2 size={16} />
           </div>
           <div className="ops-tile__body">
-            <span className="ops-tile__label">Geri Kazanılabilir Disk</span>
+            <span className="ops-tile__label">{t("overview.reclaimable_disk")}</span>
             <strong className="ops-tile__value tabular">
               {formatBytes(scanReport?.total_reclaimable_bytes ?? 0)}
             </strong>
@@ -331,7 +341,7 @@ export function OverviewView({
             <GitBranch size={16} />
           </div>
           <div className="ops-tile__body">
-            <span className="ops-tile__label">Kirli Git Repoları</span>
+            <span className="ops-tile__label">{t("overview.dirty_repos")}</span>
             <strong className="ops-tile__value tabular">
               {scanReport?.dirty_projects ?? 0} repo
             </strong>
@@ -349,7 +359,7 @@ export function OverviewView({
             <Globe size={16} />
           </div>
           <div className="ops-tile__body">
-            <span className="ops-tile__label">Çevrimdışı Canlı Siteler</span>
+            <span className="ops-tile__label">{t("overview.offline_sites")}</span>
             <strong className="ops-tile__value tabular">
               {offlineSitesCount} site
             </strong>
@@ -487,14 +497,14 @@ export function OverviewView({
         <div className="panel">
           <div className="panel__head">
             <h2 className="panel__title">
-              <Activity size={16} /> En Çok RAM Tüketen Süreçler
+              <Activity size={16} /> {t("overview.top_ram_procs")}
             </h2>
             <button
               type="button"
               className="link-btn"
               onClick={() => onNavigate("processes")}
             >
-              Tümünü Gör →
+              {t("overview.view_all")}
             </button>
           </div>
           {topRamProcesses.length === 0 ? (

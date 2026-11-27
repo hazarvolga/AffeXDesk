@@ -3605,3 +3605,31 @@ body.is-floating-hud {
   gap: 10px;
   margin-top: 6px;
 }
+
+
+.sidebar-bottom-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.lang-switch-btn {
+  height: 34px;
+  min-width: 38px;
+  padding: 0 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border-subtle);
+  background: #111114;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: border-color 140ms ease, color 140ms ease;
+}
+
+.lang-switch-btn:hover {
+  border-color: rgba(56, 189, 248, 0.5);
+  color: #38bdf8;
+}

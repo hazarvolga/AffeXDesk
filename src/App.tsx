@@ -56,6 +56,7 @@ import { AiDrawer } from "./components/AiDrawer";
 import { BootSplash } from "./components/BootSplash";
 import { EdgeEqualizer } from "./components/EdgeEqualizer";
 import { ArcadeOverlay } from "./components/ArcadeOverlay";
+import { useI18n } from "./lib/i18n";
 
 interface ToastMessage {
   id: number;
@@ -65,27 +66,28 @@ interface ToastMessage {
 
 const NAV_ITEMS: Array<{
   id: NavTab;
-  label: string;
+  labelKey: string;
   shortcut: string;
   icon: typeof LayoutDashboard;
 }> = [
-  { id: "overview", label: "Genel Bakış", shortcut: "1", icon: LayoutDashboard },
-  { id: "processes", label: "Süreçler", shortcut: "2", icon: Cpu },
-  { id: "projects", label: "Projeler", shortcut: "3", icon: FolderGit2 },
-  { id: "disk", label: "Disk Analizi", shortcut: "4", icon: HardDrive },
-  { id: "clients", label: "Müşteriler & Destek", shortcut: "5", icon: Users },
-  { id: "git", label: "Git / Repolar", shortcut: "6", icon: GitBranch },
-  { id: "knowledge", label: "Bilgi Bankası", shortcut: "7", icon: BookOpen },
+  { id: "overview", labelKey: "nav.overview", shortcut: "1", icon: LayoutDashboard },
+  { id: "processes", labelKey: "nav.processes", shortcut: "2", icon: Cpu },
+  { id: "projects", labelKey: "nav.projects", shortcut: "3", icon: FolderGit2 },
+  { id: "disk", labelKey: "nav.disk", shortcut: "4", icon: HardDrive },
+  { id: "clients", labelKey: "nav.clients", shortcut: "5", icon: Users },
+  { id: "git", labelKey: "nav.git", shortcut: "6", icon: GitBranch },
+  { id: "knowledge", labelKey: "nav.knowledge", shortcut: "7", icon: BookOpen },
   {
     id: "studio",
-    label: "Stüdyo & DevOps",
+    labelKey: "nav.studio",
     shortcut: "8",
     icon: Clapperboard,
   },
-  { id: "settings", label: "Ayarlar", shortcut: "9", icon: Settings },
+  { id: "settings", labelKey: "nav.settings", shortcut: "9", icon: Settings },
 ];
 
 export default function App() {
+  const { lang, setLang, t } = useI18n();
   const [bootStage, setBootStage] = useState<"splash" | "entering" | "ready">(
     () => {
       const mode = (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE;
@@ -748,7 +750,7 @@ export default function App() {
                 onClick={() => setActiveTab(item.id)}
               >
                 <Icon size={16} aria-hidden="true" />
-                <span className="nav-item__label">{item.label}</span>
+                <span className="nav-item__label">{t(item.labelKey)}</span>
                 {badge && (
                   <span className={`nav-badge nav-badge--${badge.tone} tabular`}>
                     {badge.count}
@@ -772,19 +774,32 @@ export default function App() {
             <Pin size={14} className="text-cyan" />
           )}
           <span className="nav-item__label">
-            {floatingHudOpen ? "Üst Bant: Açık" : "Üst Banda Sabitle"}
+            {floatingHudOpen ? t("nav.hud_on") : t("nav.hud_pin")}
           </span>
         </button>
 
-        <button
-          type="button"
-          className={`ai-trigger-btn ${aiDrawerOpen ? "ai-trigger-btn--active" : ""}`}
-          onClick={() => setAiDrawerOpen(true)}
-        >
-          <Sparkles size={15} className="text-cyan" />
-          <span className="nav-item__label">AI Asistan</span>
-          <kbd className="nav-kbd">⌘K</kbd>
-        </button>
+        <div className="sidebar-bottom-row">
+          <button
+            type="button"
+            className={`ai-trigger-btn ${aiDrawerOpen ? "ai-trigger-btn--active" : ""}`}
+            style={{ flex: 1, marginBottom: 0 }}
+            onClick={() => setAiDrawerOpen(true)}
+          >
+            <Sparkles size={15} className="text-cyan" />
+            <span className="nav-item__label">{t("nav.ai_assistant")}</span>
+            <kbd className="nav-kbd">⌘K</kbd>
+          </button>
+
+          <button
+            type="button"
+            className="lang-switch-btn mono"
+            onClick={() => setLang(lang === "tr" ? "en" : "tr")}
+            title={lang === "tr" ? "Switch UI to English" : "Arayüzü Türkçeye çevir"}
+            aria-label="Dil Değiştir / Switch Language"
+          >
+            {lang === "tr" ? "EN" : "TR"}
+          </button>
+        </div>
 
         <div
           className="sidebar__footer sidebar__footer--arcade"
@@ -837,7 +852,7 @@ export default function App() {
             </span>
           ) : (
             <span className="muted mono truncate">
-              {metrics?.os_name || "Yerel Telemetri"}
+              {metrics?.os_name || t("nav.local_telemetry")}
             </span>
           )}
         </div>
@@ -918,7 +933,7 @@ export default function App() {
               title="Disk Analizi ekranına git"
             >
               <HardDrive size={13} className="text-emerald" />
-              <span className="telemetry-ribbon__label">Disk</span>
+              <span className="telemetry-ribbon__label">{t("telem.disk")}</span>
               <strong className="telemetry-ribbon__value tabular">
                 {formatPct(metrics.disk_used_pct)}
               </strong>
@@ -935,7 +950,7 @@ export default function App() {
                 />
               </span>
               <span className="telemetry-ribbon__meta tabular">
-                {formatBytes(metrics.disk_available_bytes)} boş
+                {formatBytes(metrics.disk_available_bytes)} {t("telem.disk_free")}
               </span>
             </button>
 
@@ -954,7 +969,7 @@ export default function App() {
                     : "muted"
                 }
               />
-              <span className="telemetry-ribbon__label">Termal</span>
+              <span className="telemetry-ribbon__label">{t("telem.thermal")}</span>
               <strong className="telemetry-ribbon__value tabular">
                 {metrics.temperature_c !== null
                   ? `${Math.round(metrics.temperature_c)}°C`
@@ -972,12 +987,12 @@ export default function App() {
                 }`}
               >
                 {metrics.thermal_state === "critical"
-                  ? "Kritik"
+                  ? t("telem.critical")
                   : metrics.thermal_state === "serious"
-                  ? "Yüksek"
+                  ? t("telem.serious")
                   : metrics.thermal_state === "fair"
-                  ? "Ilık"
-                  : "Nominal"}
+                  ? t("telem.fair")
+                  : t("telem.nominal")}
               </span>
             </div>
 

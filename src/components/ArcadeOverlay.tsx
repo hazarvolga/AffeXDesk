@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Volume2, VolumeX, X } from "lucide-react";
+import { useI18n } from "../lib/i18n";
 
 export interface ArcadeOverlayProps {
   onClose: () => void;
@@ -146,6 +147,7 @@ class RetroSynth {
 }
 
 export function ArcadeOverlay({ onClose }: ArcadeOverlayProps) {
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const synthRef = useRef<RetroSynth | null>(null);
 
@@ -572,16 +574,16 @@ export function ArcadeOverlay({ onClose }: ArcadeOverlayProps) {
         <div className="arcade-hud__left">
           <span className="badge badge--info">CARD INVADERS</span>
           <span className="tabular">
-            SKOR: <strong className="text-cyan">{score}</strong>
+            {t("arcade.score")}: <strong className="text-cyan">{score}</strong>
           </span>
           <span className="tabular muted">
-            REKOR: <strong>{highScore}</strong>
+            {t("arcade.high")}: <strong>{highScore}</strong>
           </span>
           {combo >= 2 && (
             <span className="badge badge--success tabular">x{combo} COMBO</span>
           )}
           <span className="tabular">
-            CAN:{" "}
+            {t("arcade.lives")}:{" "}
             <strong className="text-danger">
               {"♥".repeat(Math.max(0, lives))}
             </strong>
@@ -590,13 +592,13 @@ export function ArcadeOverlay({ onClose }: ArcadeOverlayProps) {
 
         <div className="arcade-hud__right">
           <span className="muted" style={{ fontSize: 11 }}>
-            Fare / ←→ Hareket · Tık / Space Ateş
+            {t("arcade.controls")}
           </span>
           <button
             type="button"
             className="btn btn--ghost btn--sm"
             onClick={() => setMuted((m) => !m)}
-            title={muted ? "Sesi aç" : "Sesi kapat"}
+            title={muted ? "Unmute" : "Mute"}
           >
             {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
           </button>
@@ -606,17 +608,17 @@ export function ArcadeOverlay({ onClose }: ArcadeOverlayProps) {
             onClick={onClose}
           >
             <X size={13} />
-            <span>Çık (ESC)</span>
+            <span>{t("arcade.exit")}</span>
           </button>
         </div>
       </div>
 
       {gameOver && (
         <div className="arcade-gameover mono">
-          <h2>OYUN BİTTİ</h2>
+          <h2>{t("arcade.game_over")}</h2>
           <p>
-            Skor: <strong className="text-cyan">{score}</strong> · Rekor:{" "}
-            <strong className="text-emerald">{highScore}</strong>
+            {t("arcade.score")}: <strong className="text-cyan">{score}</strong> ·{" "}
+            {t("arcade.high")}: <strong className="text-emerald">{highScore}</strong>
           </p>
           <div className="arcade-gameover__actions">
             <button
@@ -625,14 +627,14 @@ export function ArcadeOverlay({ onClose }: ArcadeOverlayProps) {
               onClick={handleRestart}
             >
               <RotateCcw size={14} />
-              <span>Tekrar Oyna</span>
+              <span>{t("arcade.play_again")}</span>
             </button>
             <button
               type="button"
               className="btn btn--secondary"
               onClick={onClose}
             >
-              <span>Çalışmaya Dön</span>
+              <span>{t("arcade.back_work")}</span>
             </button>
           </div>
         </div>

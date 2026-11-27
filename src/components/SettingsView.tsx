@@ -18,6 +18,7 @@ import {
   type SocialBridgeSnapshot,
   type WorkspaceRecord,
 } from "../lib/api";
+import { useI18n, type UiLanguage } from "../lib/i18n";
 
 export interface SettingsViewProps {
   workspaces: WorkspaceRecord[];
@@ -49,6 +50,7 @@ export function SettingsView({
   onSaveSettings,
   onNotify,
 }: SettingsViewProps) {
+  const { t, lang, setLang } = useI18n();
   const [defaultIde, setDefaultIde] = useState(settings.default_ide || "code");
   const [refreshSecs, setRefreshSecs] = useState(
     settings.refresh_interval_secs || "5"
@@ -164,10 +166,11 @@ export function SettingsView({
     <div className="view-stack">
       <header className="view-header">
         <div>
-          <h1 className="view-title">Ayarlar</h1>
+          <h1 className="view-title">{t("nav.settings")}</h1>
           <p className="view-subtitle">
-            İş klasörleri, varsayılan geliştirme araçları ve Faz 2 canlı
-            entegrasyonları
+            {lang === "en"
+              ? "Workspaces, UI language, default developer tools, and live integrations"
+              : "İş klasörleri, arayüz dili, varsayılan geliştirme araçları ve canlı entegrasyonlar"}
           </p>
         </div>
       </header>
@@ -222,7 +225,18 @@ export function SettingsView({
 
           <div className="form-grid">
             <label className="form-field">
-              <span>Varsayılan IDE</span>
+              <span>{lang === "en" ? "Interface Language" : "Arayüz Dili"}</span>
+              <select
+                value={lang}
+                onChange={(e) => setLang(e.target.value as UiLanguage)}
+              >
+                <option value="en">English (EN)</option>
+                <option value="tr">Türkçe (TR)</option>
+              </select>
+            </label>
+
+            <label className="form-field">
+              <span>{lang === "en" ? "Default IDE" : "Varsayılan IDE"}</span>
               <select
                 value={defaultIde}
                 onChange={(e) => setDefaultIde(e.target.value)}

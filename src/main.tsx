@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { FloatingHudBar } from "./components/FloatingHudBar";
+import { I18nProvider } from "./lib/i18n";
 import "./styles.css";
 
 const rootElement = document.getElementById("root");
@@ -17,6 +18,8 @@ if (isFloatingHud) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    {isFloatingHud ? <FloatingHudBar /> : <App />}
+    <I18nProvider>
+      {isFloatingHud ? <FloatingHudBar /> : <App />}
+    </I18nProvider>
   </StrictMode>
 );

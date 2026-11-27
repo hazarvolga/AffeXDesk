@@ -11,6 +11,41 @@
 > Zero cloud lock-in. Zero hardcoded paths. Zero telemetry sent off your machine.  
 > Everything runs natively on your workstation with strict safety guards and a sharp, flat near-black granite interface.
 
+<p align="center">
+  <img src="./docs/screenshots/01-boot-hud.png" alt="AffeXDesk Tactical Lidar Boot HUD & Real-Data Matrix Rain" width="100%" />
+</p>
+
+## Visual Tour
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="./docs/screenshots/02-overview.png" alt="Mission Control Overview" />
+      <p align="center"><strong>Mission Control Overview</strong> — Live CPU, RAM, Disk, Thermal, Zombie Processes & Reclaimable Workspaces</p>
+    </td>
+    <td width="50%">
+      <img src="./docs/screenshots/03-projects.png" alt="Workspace & Project Hub" />
+      <p align="center"><strong>Project Hub</strong> — Multi-stack detection, Git status, live URL uptime & clickable cache chips</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="./docs/screenshots/04-disk-analyzer.png" alt="Visual Disk Analyzer" />
+      <p align="center"><strong>Visual Disk Analyzer</strong> — Parallel fan-out scanner, SVG category donut & Quick Wins</p>
+    </td>
+    <td width="50%">
+      <img src="./docs/screenshots/05-smart-cleaner.png" alt="Smart System Cleaner" />
+      <p align="center"><strong>Smart System Cleaner</strong> — Safe Docker, pnpm, npm, pip, uv, Homebrew & Xcode cleanup</p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="./docs/screenshots/06-clients-remote.png" alt="Clients & Zero-Server Remote Support" width="76%" />
+      <p align="center"><strong>Clients & Zero-Server Remote Support</strong> — Local SQLite CRM with 1-click RustDesk, AnyDesk, VNC, RDP & SSH launchers</p>
+    </td>
+  </tr>
+</table>
+
 ---
 
 ## Why AffeXDesk?

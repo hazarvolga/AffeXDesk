@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Briefcase,
   Calendar,
@@ -7,9 +7,11 @@ import {
   Code2,
   ExternalLink,
   FolderOpen,
+  GitBranch,
   Monitor,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   Users,
@@ -21,10 +23,17 @@ import {
   type ClientProjectInput,
   type ClientProjectRecord,
   type ClientRecord,
+  type ProjectInfo,
 } from "../lib/api";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 export interface ClientsViewProps {
+  clients: ClientRecord[];
+  projects: ClientProjectRecord[];
+  workspaceProjects: ProjectInfo[];
+  onReloadClients: () => Promise<void>;
+  onRescanWorkspaces: () => Promise<void>;
+  onConnectRemote: (client: ClientRecord) => Promise<void>;
   onOpenFinder: (path: string) => void;
   onOpenIde: (path: string) => void;
   onOpenUrl: (url: string) => void;
@@ -108,16 +117,20 @@ function formatShortDate(iso: string | null): string {
 }
 
 export function ClientsView({
+  clients,
+  projects,
+  workspaceProjects,
+  onReloadClients,
+  onRescanWorkspaces,
+  onConnectRemote,
   onOpenFinder,
   onOpenIde,
   onOpenUrl,
   onNotify,
 }: ClientsViewProps) {
   const [subTab, setSubTab] = useState<"projects" | "clients">("projects");
-  const [clients, setClients] = useState<ClientRecord[]>([]);
-  const [projects, setProjects] = useState<ClientProjectRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [connectingId, setConnectingId] = useState<number | null>(null);
+  const [syncingGit, setSyncingGit] = useState(false);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -142,24 +155,26 @@ export function ClientsView({
   const [deleting, setDeleting] = useState(false);
 
   const reloadAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [cList, pList] = await Promise.all([
-        api.listClients(),
-        api.listClientProjects(),
-      ]);
-      setClients(cList);
-      setProjects(pList);
-    } catch (err) {
-      onNotify("error", `Müşteri verileri yüklenemedi: ${String(err)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [onNotify]);
+    await onReloadClients();
+  }, [onReloadClients]);
 
-  useEffect(() => {
-    void reloadAll();
-  }, [reloadAll]);
+  const workspaceByPath = useMemo(() => {
+    const map = new Map<string, ProjectInfo>();
+    for (const wp of workspaceProjects) {
+      map.set(wp.path, wp);
+    }
+    return map;
+  }, [workspaceProjects]);
+
+  const dirtyLinkedCount = useMemo(() => {
+    let count = 0;
+    for (const p of projects) {
+      if (!p.local_path) continue;
+      const wp = workspaceByPath.get(p.local_path);
+      if (wp && wp.git_dirty_count > 0) count += 1;
+    }
+    return count;
+  }, [projects, workspaceByPath]);
 
   const clientsById = useMemo(() => {
     const map = new Map<number, ClientRecord>();
@@ -236,29 +251,25 @@ export function ClientsView({
 
   const handleConnectRemote = useCallback(
     async (client: ClientRecord) => {
-      if (!client.remote_id.trim()) {
-        onNotify(
-          "info",
-          `${client.name} için henüz Uzak Bağlantı ID tanımlanmamış.`
-        );
-        return;
-      }
       setConnectingId(client.id);
       try {
-        const uri = await api.connectRemoteClient(client.id);
-        onNotify(
-          "success",
-          `${client.name} bağlantısı başlatıldı (${uri}).`
-        );
-        void reloadAll();
-      } catch (err) {
-        onNotify("error", String(err));
+        await onConnectRemote(client);
       } finally {
         setConnectingId(null);
       }
     },
-    [onNotify, reloadAll]
+    [onConnectRemote]
   );
+
+  const handleSyncGitStatus = useCallback(async () => {
+    setSyncingGit(true);
+    try {
+      await Promise.all([onRescanWorkspaces(), onReloadClients()]);
+      onNotify("success", "Git ve iş klasörü durumları güncellendi.");
+    } finally {
+      setSyncingGit(false);
+    }
+  }, [onRescanWorkspaces, onReloadClients, onNotify]);
 
   const handleSaveClient = useCallback(
     async (e: React.FormEvent) => {
@@ -408,6 +419,16 @@ export function ClientsView({
           <button
             type="button"
             className="btn btn--ghost"
+            onClick={() => void handleSyncGitStatus()}
+            disabled={syncingGit}
+            title="dev/ iş klasörlerindeki canlı Git ve HANDOFF ilerleme durumlarını yenile"
+          >
+            <RefreshCw size={14} className={syncingGit ? "spin" : ""} />
+            <span>Git Senkronize Et</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
             onClick={() =>
               void copyText(
                 CLIENT_INVITE_TEMPLATE,
@@ -469,7 +490,9 @@ export function ClientsView({
           </div>
           <div className="metric-card__value tabular">{activeProjectsCount}</div>
           <p className="metric-card__meta">
-            Toplam {projects.length} kayıtlı müşteri işi
+            {dirtyLinkedCount > 0
+              ? `${dirtyLinkedCount} projede commit bekleyen Git değişikliği`
+              : `Toplam ${projects.length} kayıtlı müşteri işi`}
           </p>
         </article>
 
@@ -677,6 +700,44 @@ export function ClientsView({
             </button>
           </div>
 
+          {workspaceProjects.length > 0 && (
+            <label className="field">
+              <span>
+                İş Klasöründen (dev/) Proje Seç — Otomatik Doldur (Git & HANDOFF
+                senkronize)
+              </span>
+              <select
+                value={projectForm.local_path}
+                onChange={(e) => {
+                  const pickedPath = e.target.value;
+                  const wp = workspaceByPath.get(pickedPath);
+                  if (!wp) {
+                    setProjectForm((f) => ({ ...f, local_path: "" }));
+                    return;
+                  }
+                  setProjectForm((f) => ({
+                    ...f,
+                    title: f.title.trim() ? f.title : wp.name,
+                    local_path: wp.path,
+                    live_url: f.live_url.trim() ? f.live_url : wp.live_url ?? "",
+                    progress_pct:
+                      wp.progress_pct !== null ? wp.progress_pct : f.progress_pct,
+                  }));
+                }}
+              >
+                <option value="">— Elle gir veya dev/ klasöründen seç —</option>
+                {workspaceProjects.map((wp) => (
+                  <option key={wp.path} value={wp.path}>
+                    {wp.name} ({wp.workspace_label}
+                    {wp.git_branch ? ` · ${wp.git_branch}` : ""}
+                    {wp.git_dirty_count > 0 ? ` · ${wp.git_dirty_count} değişiklik` : ""}
+                    )
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           <div className="client-form__grid">
             <label className="field">
               <span>Müşteri *</span>
@@ -866,18 +927,20 @@ export function ClientsView({
             )}
           </div>
 
-          {loading && projects.length === 0 ? (
-            <div className="empty-inline">Müşteri projeleri yükleniyor...</div>
-          ) : filteredProjects.length === 0 ? (
+          {filteredProjects.length === 0 ? (
             <div className="empty-inline">
               Henüz kayıtlı müşteri projesi yok. Sağ üstteki{" "}
               <strong>Yeni Müşteri</strong> ve <strong>Yeni Proje</strong>{" "}
-              butonlarıyla başlayın.
+              butonlarıyla başlayın veya <strong>Proje Radarı</strong>ndan
+              mevcut <code>dev/</code> klasörlerinizi doğrudan bir müşteriye atayın.
             </div>
           ) : (
             <div className="clients-grid">
               {filteredProjects.map((proj) => {
                 const client = clientsById.get(proj.client_id);
+                const linkedWp = proj.local_path
+                  ? workspaceByPath.get(proj.local_path) ?? null
+                  : null;
                 const statusInfo = STATUS_META[proj.status] ?? {
                   label: proj.status,
                   badgeClass: "badge--neutral",
@@ -918,6 +981,51 @@ export function ClientsView({
                           />
                           Teslim: {proj.due_date}
                         </span>
+                      )}
+
+                      {linkedWp && (
+                        <div className="client-git-strip">
+                          <div className="client-git-strip__top">
+                            <span className="client-git-strip__branch mono">
+                              <GitBranch size={12} className="text-cyan" />
+                              {linkedWp.git_branch || "no-git"}
+                            </span>
+                            <span
+                              className={`badge tabular ${
+                                linkedWp.git_dirty_count > 0
+                                  ? "badge--warning"
+                                  : "badge--success"
+                              }`}
+                            >
+                              {linkedWp.git_dirty_count > 0
+                                ? `${linkedWp.git_dirty_count} değişiklik`
+                                : "Git Temiz"}
+                            </span>
+                          </div>
+                          {linkedWp.git_last_commit && (
+                            <span
+                              className="client-git-strip__commit mono"
+                              title={linkedWp.git_last_commit}
+                            >
+                              {linkedWp.git_last_commit}
+                            </span>
+                          )}
+                          {linkedWp.progress_pct !== null &&
+                            linkedWp.progress_pct !== proj.progress_pct && (
+                              <button
+                                type="button"
+                                className="btn btn--ghost btn--sm"
+                                style={{ alignSelf: "flex-start", marginTop: 2 }}
+                                onClick={() =>
+                                  void handleQuickProjectUpdate(proj, {
+                                    progress_pct: linkedWp.progress_pct!,
+                                  })
+                                }
+                              >
+                                HANDOFF (%{linkedWp.progress_pct}) ile Eşitle
+                              </button>
+                            )}
+                        </div>
                       )}
                     </div>
 
@@ -1076,12 +1184,10 @@ export function ClientsView({
             </span>
           </div>
 
-          {loading && clients.length === 0 ? (
-            <div className="empty-inline">Müşteriler yükleniyor...</div>
-          ) : filteredClients.length === 0 ? (
+          {filteredClients.length === 0 ? (
             <div className="empty-inline">
               Henüz müşteri eklenmedi. <strong>Yeni Müşteri</strong> butonuyla
-              ilk müşterinizi ve RustDesk ID'sini ekleyin.
+              ilk müşterinizi ve RustDesk ID&apos;sini ekleyin.
             </div>
           ) : (
             <div className="clients-grid">

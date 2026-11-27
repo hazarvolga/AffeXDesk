@@ -19,7 +19,10 @@ import {
 } from "lucide-react";
 import {
   api,
+  type ClientProjectRecord,
+  type ClientRecord,
   type DevProcessReport,
+  type ProjectInfo,
   type SocialBridgeSnapshot,
   type SystemMetrics,
   type UptimeResult,
@@ -86,6 +89,8 @@ export default function App() {
   const [processes, setProcesses] = useState<DevProcessReport | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [scanReport, setScanReport] = useState<WorkspaceScanReport | null>(null);
+  const [clients, setClients] = useState<ClientRecord[]>([]);
+  const [clientProjects, setClientProjects] = useState<ClientProjectRecord[]>([]);
   const [uptimeMap, setUptimeMap] = useState<Record<string, UptimeResult>>({});
   const [socialSnapshot, setSocialSnapshot] =
     useState<SocialBridgeSnapshot | null>(null);
@@ -143,6 +148,84 @@ export default function App() {
     }
   }, []);
 
+  const refreshClientsAndProjects = useCallback(async () => {
+    try {
+      const [cRes, pRes] = await Promise.allSettled([
+        api.listClients(),
+        api.listClientProjects(),
+      ]);
+      if (cRes.status === "fulfilled") setClients(cRes.value);
+      if (pRes.status === "fulfilled") setClientProjects(pRes.value);
+    } catch {
+      // yoksay
+    }
+  }, []);
+
+  const handleAssignProjectToClient = useCallback(
+    async (project: ProjectInfo, clientId: number | null) => {
+      try {
+        const existing = clientProjects.find(
+          (cp) => cp.local_path && cp.local_path === project.path
+        );
+        if (clientId === null) {
+          if (existing) {
+            await api.deleteClientProject(existing.id);
+            showToast(
+              "info",
+              `${project.name} müşteri bağlantısından çıkarıldı.`
+            );
+          }
+        } else {
+          await api.saveClientProject({
+            id: existing?.id ?? null,
+            client_id: clientId,
+            title: existing?.title || project.name,
+            status: existing?.status || "active",
+            priority: existing?.priority || "normal",
+            progress_pct:
+              existing !== undefined
+                ? existing.progress_pct
+                : project.progress_pct ?? 20,
+            due_date: existing?.due_date || "",
+            local_path: project.path,
+            live_url: existing?.live_url || project.live_url || "",
+            notes: existing?.notes || "",
+          });
+          const clientName =
+            clients.find((c) => c.id === clientId)?.name ?? "Müşteri";
+          showToast(
+            "success",
+            `${project.name} → ${clientName} müşterisine bağlandı.`
+          );
+        }
+        await refreshClientsAndProjects();
+      } catch (err) {
+        showToast("error", `Müşteri atanamadı: ${String(err)}`);
+      }
+    },
+    [clientProjects, clients, refreshClientsAndProjects, showToast]
+  );
+
+  const handleConnectRemoteClient = useCallback(
+    async (client: ClientRecord) => {
+      if (!client.remote_id.trim()) {
+        showToast(
+          "info",
+          `${client.name} için henüz Uzak Bağlantı ID tanımlanmamış.`
+        );
+        return;
+      }
+      try {
+        const uri = await api.connectRemoteClient(client.id);
+        showToast("success", `${client.name} bağlantısı başlatıldı (${uri}).`);
+        void refreshClientsAndProjects();
+      } catch (err) {
+        showToast("error", String(err));
+      }
+    },
+    [refreshClientsAndProjects, showToast]
+  );
+
   const refreshSocialSnapshot = useCallback(async () => {
     setLoadingSocial(true);
     try {
@@ -172,6 +255,7 @@ export default function App() {
       await Promise.all([
         refreshTelemetry(),
         refreshWorkspacesAndProjects(),
+        refreshClientsAndProjects(),
         refreshSocialSnapshot(),
       ]);
     }
@@ -180,7 +264,12 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [refreshTelemetry, refreshWorkspacesAndProjects, refreshSocialSnapshot]);
+  }, [
+    refreshTelemetry,
+    refreshWorkspacesAndProjects,
+    refreshClientsAndProjects,
+    refreshSocialSnapshot,
+  ]);
 
   // Canlı telemetri döngüsü
   useEffect(() => {
@@ -705,6 +794,10 @@ export default function App() {
             loading={loadingProjects}
             checkingUptime={checkingUptime}
             filter={projectFilter}
+            clients={clients}
+            clientProjects={clientProjects}
+            onAssignClient={handleAssignProjectToClient}
+            onConnectRemote={(client) => void handleConnectRemoteClient(client)}
             onFilterChange={setProjectFilter}
             onAddWorkspace={() => void handleAddWorkspace()}
             onRescan={() => void refreshWorkspacesAndProjects()}
@@ -727,6 +820,12 @@ export default function App() {
 
         {activeTab === "clients" && (
           <ClientsView
+            clients={clients}
+            projects={clientProjects}
+            workspaceProjects={scanReport?.projects ?? []}
+            onReloadClients={refreshClientsAndProjects}
+            onRescanWorkspaces={refreshWorkspacesAndProjects}
+            onConnectRemote={handleConnectRemoteClient}
             onOpenFinder={(p) => void handleOpenFinder(p)}
             onOpenIde={(p) => void handleOpenIde(p)}
             onOpenUrl={(u) => void handleOpenUrl(u)}

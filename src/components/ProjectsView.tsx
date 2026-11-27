@@ -7,13 +7,17 @@ import {
   FolderPlus,
   GitBranch,
   Globe,
+  Monitor,
   Pencil,
   RefreshCw,
   Search,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
 import type {
+  ClientProjectRecord,
+  ClientRecord,
   ProjectInfo,
   UptimeResult,
   WorkspaceScanReport,
@@ -28,6 +32,10 @@ export interface ProjectsViewProps {
   loading: boolean;
   checkingUptime: boolean;
   filter: ProjectFilter;
+  clients?: ClientRecord[];
+  clientProjects?: ClientProjectRecord[];
+  onAssignClient?: (project: ProjectInfo, clientId: number | null) => Promise<void>;
+  onConnectRemote?: (client: ClientRecord) => void;
   onFilterChange: (filter: ProjectFilter) => void;
   onAddWorkspace: () => void;
   onRescan: () => void;
@@ -52,6 +60,10 @@ export function ProjectsView({
   loading,
   checkingUptime,
   filter,
+  clients = [],
+  clientProjects = [],
+  onAssignClient,
+  onConnectRemote,
   onFilterChange,
   onAddWorkspace,
   onRescan,
@@ -337,6 +349,56 @@ export function ProjectsView({
                     </button>
                   </div>
                 )}
+
+                {/* Müşteri Atama & Uzak Bağlantı (İki Yönlü Senkronizasyon) */}
+                {onAssignClient && clients.length > 0 && (() => {
+                  const linkedProj = clientProjects.find(
+                    (cp) => cp.local_path && cp.local_path === proj.path
+                  );
+                  const linkedClient = linkedProj
+                    ? clients.find((c) => c.id === linkedProj.client_id) ?? null
+                    : null;
+                  return (
+                    <div className="project-client-row">
+                      <span className="project-client-row__label">
+                        <Users size={12} className="text-cyan" />
+                        <span>Müşteri</span>
+                      </span>
+                      <select
+                        className="inline-select"
+                        value={linkedClient ? String(linkedClient.id) : ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          void onAssignClient(
+                            proj,
+                            val ? Number(val) : null
+                          );
+                        }}
+                        aria-label={`${proj.name} müşteri ata`}
+                      >
+                        <option value="">Müşterisiz</option>
+                        {clients.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      {linkedClient &&
+                        linkedClient.remote_id.trim() &&
+                        onConnectRemote && (
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            onClick={() => onConnectRemote(linkedClient)}
+                            title={`${linkedClient.name} uzak bağlantısı`}
+                          >
+                            <Monitor size={12} />
+                            <span>Bağlan</span>
+                          </button>
+                        )}
+                    </div>
+                  );
+                })()}
 
                 {/* Hızlı Aksiyonlar */}
                 <div className="project-card__footer">

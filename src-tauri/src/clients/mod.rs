@@ -42,7 +42,7 @@ pub fn launch_remote_uri(uri: &str) -> Result<(), String> {
                 "Uzak bağlantı aracı bulunamadı veya açılamadı ({uri}). İlgili uygulamanın (örn. RustDesk) kurulu olduğundan emin olun."
             ));
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]

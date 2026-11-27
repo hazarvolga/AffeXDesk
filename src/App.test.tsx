@@ -45,6 +45,10 @@ vi.mock("./lib/api", () => ({
     getCachedDiskBreakdown: vi.fn(),
     scanDiskBreakdown: vi.fn(),
     movePathToTrash: vi.fn(),
+    getCachedCleanerScan: vi.fn(),
+    scanSystemCleaner: vi.fn(),
+    runSystemCleaner: vi.fn(),
+    restartDockerDesktop: vi.fn(),
   },
 }));
 
@@ -159,6 +163,23 @@ describe("App", () => {
     mockedApi.checkFullDiskAccess.mockResolvedValue(true);
     mockedApi.openFullDiskAccessSettings.mockResolvedValue();
     mockedApi.getCachedDiskBreakdown.mockResolvedValue(null);
+    mockedApi.getCachedCleanerScan.mockResolvedValue(null);
+    mockedApi.scanSystemCleaner.mockResolvedValue({
+      scanned_at: "2026-11-27T15:00:00Z",
+      total_reclaimable_bytes: 0,
+      safe_reclaimable_bytes: 0,
+      review_reclaimable_bytes: 0,
+      docker_available: false,
+      items: [],
+    });
+    mockedApi.runSystemCleaner.mockResolvedValue({
+      total_freed_bytes: 0,
+      succeeded: 0,
+      failed: 0,
+      needs_docker_restart: false,
+      results: [],
+    });
+    mockedApi.restartDockerDesktop.mockResolvedValue();
     mockedApi.scanCreativeCaches.mockResolvedValue([]);
     mockedApi.scanLocalAiModels.mockResolvedValue([]);
     mockedApi.inspectDocker.mockResolvedValue({

@@ -307,6 +307,43 @@ export interface DiskBreakdownReport {
   quick_wins: DiskEntry[];
 }
 
+export interface CleanerItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  category: string;
+  risk: "safe" | "review" | string;
+  size_bytes: number;
+  default_selected: boolean;
+  path_hint: string | null;
+  note: string | null;
+}
+
+export interface CleanerScanReport {
+  scanned_at: string;
+  total_reclaimable_bytes: number;
+  safe_reclaimable_bytes: number;
+  review_reclaimable_bytes: number;
+  docker_available: boolean;
+  items: CleanerItem[];
+}
+
+export interface CleanerRunItemResult {
+  id: string;
+  title: string;
+  ok: boolean;
+  freed_bytes: number;
+  message: string;
+}
+
+export interface CleanerRunReport {
+  total_freed_bytes: number;
+  succeeded: number;
+  failed: number;
+  needs_docker_restart: boolean;
+  results: CleanerRunItemResult[];
+}
+
 export const api = {
   appVersion(): Promise<string> {
     return invoke<string>("app_version");
@@ -521,5 +558,21 @@ export const api = {
 
   movePathToTrash(path: string): Promise<number> {
     return invoke<number>("move_path_to_trash", { path });
+  },
+
+  getCachedCleanerScan(): Promise<CleanerScanReport | null> {
+    return invoke<CleanerScanReport | null>("get_cached_cleaner_scan");
+  },
+
+  scanSystemCleaner(): Promise<CleanerScanReport> {
+    return invoke<CleanerScanReport>("scan_system_cleaner");
+  },
+
+  runSystemCleaner(itemIds: string[]): Promise<CleanerRunReport> {
+    return invoke<CleanerRunReport>("run_system_cleaner", { itemIds });
+  },
+
+  restartDockerDesktop(): Promise<void> {
+    return invoke<void>("restart_docker_desktop");
   },
 };

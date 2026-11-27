@@ -3,6 +3,7 @@ use std::path::Path;
 use tauri::State;
 
 use crate::ai_copilot;
+use crate::cleaner;
 use crate::db::{self, Database};
 use crate::devops;
 use crate::disk_analyzer;
@@ -497,4 +498,32 @@ pub async fn move_path_to_trash(path: String) -> Result<u64, String> {
     tokio::task::spawn_blocking(move || disk_analyzer::move_path_to_trash(&path))
         .await
         .map_err(|err| format!("move to trash task failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn get_cached_cleaner_scan() -> Result<Option<cleaner::CleanerScanReport>, String> {
+    tokio::task::spawn_blocking(cleaner::get_cached_cleaner_scan)
+        .await
+        .map_err(|err| format!("cached cleaner scan failed: {err}"))
+}
+
+#[tauri::command]
+pub async fn scan_system_cleaner() -> Result<cleaner::CleanerScanReport, String> {
+    tokio::task::spawn_blocking(cleaner::scan_system_cleaner)
+        .await
+        .map_err(|err| format!("system cleaner scan failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn run_system_cleaner(item_ids: Vec<String>) -> Result<cleaner::CleanerRunReport, String> {
+    tokio::task::spawn_blocking(move || cleaner::run_system_cleaner(&item_ids))
+        .await
+        .map_err(|err| format!("system cleaner run failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn restart_docker_desktop() -> Result<(), String> {
+    tokio::task::spawn_blocking(cleaner::restart_docker_desktop)
+        .await
+        .map_err(|err| format!("restart docker desktop failed: {err}"))?
 }

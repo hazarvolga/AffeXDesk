@@ -22,6 +22,7 @@ import {
 } from "../lib/api";
 import { formatBytes, formatPct } from "../lib/format";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { SmartCleanerPanel } from "./SmartCleanerPanel";
 
 export interface DiskAnalyzerViewProps {
   onOpenFinder: (path: string) => void;
@@ -218,6 +219,7 @@ export function DiskAnalyzerView({
   const [hasFullDiskAccess, setHasFullDiskAccess] = useState<boolean | null>(
     null
   );
+  const [subTab, setSubTab] = useState<"map" | "cleaner">("map");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -477,7 +479,38 @@ export function DiskAnalyzerView({
         </div>
       </header>
 
-      {hasFullDiskAccess === false && (
+      <div className="subtabs-bar" role="tablist" aria-label="Disk Analizi Sekmeleri">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === "map"}
+          className={`subtab-btn ${subTab === "map" ? "subtab-btn--active" : ""}`}
+          onClick={() => setSubTab("map")}
+        >
+          <PieChart size={14} />
+          <span>Disk Haritası & Gezgin</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={subTab === "cleaner"}
+          className={`subtab-btn ${subTab === "cleaner" ? "subtab-btn--active" : ""}`}
+          onClick={() => setSubTab("cleaner")}
+        >
+          <Sparkles size={14} />
+          <span>Akıllı Temizleyici</span>
+        </button>
+      </div>
+
+      {subTab === "cleaner" ? (
+        <SmartCleanerPanel
+          onOpenFinder={onOpenFinder}
+          onRefreshTelemetry={onRefreshTelemetry}
+          onNotify={onNotify}
+        />
+      ) : (
+        <>
+          {hasFullDiskAccess === false && (
         <div className="fda-banner" role="note">
           <div className="fda-banner__text">
             <Lock size={15} className="text-warning" />
@@ -1022,6 +1055,8 @@ export function DiskAnalyzerView({
         onConfirm={() => void handleConfirmTrash()}
         onCancel={() => setTrashTarget(null)}
       />
+        </>
+      )}
     </div>
   );
 }

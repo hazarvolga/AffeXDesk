@@ -126,7 +126,7 @@ function buildBreadcrumbs(rootPath: string): BreadcrumbSegment[] {
 
 const DONUT_RADIUS = 82;
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
-const DISK_CACHE_STORAGE_KEY = "affexdesk.disk_analyzer.last_state.v1";
+const DISK_CACHE_STORAGE_KEY = "affexdesk.disk_analyzer.last_state.v2";
 
 interface CachedDiskScan {
   currentDir: string | null;
@@ -152,18 +152,25 @@ function cacheKeyForDir(dir: string | null, includeProtected = false): string {
 }
 
 function readPersistedDiskScan(): CachedDiskScan | null {
-  if (lastDiskScanState) return lastDiskScanState;
+  if (lastDiskScanState && lastDiskScanState.currentDir === null) {
+    return lastDiskScanState;
+  }
   try {
     if (typeof window === "undefined" || !window.localStorage) return null;
     const raw = window.localStorage.getItem(DISK_CACHE_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedDiskScan;
-    if (!parsed || !parsed.report || typeof parsed.report.root_path !== "string") {
+    if (
+      !parsed ||
+      !parsed.report ||
+      typeof parsed.report.root_path !== "string" ||
+      parsed.currentDir !== null
+    ) {
       return null;
     }
     lastDiskScanState = parsed;
     directoryScanCache.set(
-      cacheKeyForDir(parsed.currentDir, Boolean(parsed.includeProtected)),
+      cacheKeyForDir(null, Boolean(parsed.includeProtected)),
       parsed
     );
     return parsed;
@@ -286,7 +293,9 @@ export function DiskAnalyzerView({
           directoryScanCache.get(key) ??
           (targetDir === null
             ? directoryScanCache.get(cacheKeyForDir(null, !useFull)) ??
-              lastDiskScanState
+              (lastDiskScanState?.currentDir === null
+                ? lastDiskScanState
+                : undefined)
             : undefined);
         if (cached) {
           setReport(cached.report);

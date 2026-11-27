@@ -132,6 +132,7 @@ interface CachedDiskScan {
 
 const directoryScanCache = new Map<string, CachedDiskScan>();
 let lastDiskScanState: CachedDiskScan | null = null;
+const inFlightScans = new Map<string, Promise<DiskBreakdownReport>>();
 
 function cacheKeyForDir(dir: string | null): string {
   return dir ?? "__HOME__";
@@ -170,6 +171,7 @@ function persistDiskScan(entry: CachedDiskScan): void {
 export function clearDiskAnalyzerCache(): void {
   lastDiskScanState = null;
   directoryScanCache.clear();
+  inFlightScans.clear();
   try {
     if (typeof window !== "undefined" && window.localStorage) {
       window.localStorage.removeItem(DISK_CACHE_STORAGE_KEY);
@@ -234,7 +236,13 @@ export function DiskAnalyzerView({
       setLoading(true);
       setError(null);
       try {
-        const data = await api.scanDiskBreakdown(targetDir);
+        let pending = !options?.force ? inFlightScans.get(key) : undefined;
+        if (!pending) {
+          pending = api.scanDiskBreakdown(targetDir);
+          inFlightScans.set(key, pending);
+        }
+        const data = await pending;
+        inFlightScans.delete(key);
         const nowIso = new Date().toISOString();
         persistDiskScan({
           currentDir: targetDir,
@@ -246,6 +254,7 @@ export function DiskAnalyzerView({
         setScannedAt(nowIso);
         setSelectedCategory(null);
       } catch (err) {
+        inFlightScans.delete(key);
         const msg = String(err);
         setError(msg);
         onNotify("error", `Disk taraması başarısız: ${msg}`);
@@ -257,10 +266,35 @@ export function DiskAnalyzerView({
   );
 
   useEffect(() => {
-    if (!report) {
-      void loadDirectory(null);
-    }
-    // Yalnızca ilk açılışta kayıtlı tarama yoksa otomatik tara; sonraki girişlerde son tarama korunur.
+    if (report) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const backendCached = await api.getCachedDiskBreakdown();
+        if (cancelled) return;
+        if (backendCached && backendCached.report) {
+          const entry: CachedDiskScan = {
+            currentDir: null,
+            report: backendCached.report,
+            scannedAt: backendCached.scanned_at,
+          };
+          persistDiskScan(entry);
+          setReport(entry.report);
+          setCurrentDir(null);
+          setScannedAt(entry.scannedAt);
+          return;
+        }
+      } catch {
+        // Disk önbelleği okunamazsa ilk taramaya düş
+      }
+      if (!cancelled) {
+        void loadDirectory(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Yalnızca ilk açılışta kayıtlı tarama yoksa otomatik bir kez tara; sonraki girişlerde disk önbelleği korunur.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -458,6 +458,14 @@ pub async fn activate_focus_mode(mode: String) -> Result<devops::FocusModeResult
 }
 
 #[tauri::command]
+pub async fn get_cached_disk_breakdown() -> Result<Option<disk_analyzer::CachedDiskBreakdown>, String>
+{
+    tokio::task::spawn_blocking(disk_analyzer::get_cached_disk_breakdown)
+        .await
+        .map_err(|err| format!("cached disk breakdown task failed: {err}"))
+}
+
+#[tauri::command]
 pub async fn scan_disk_breakdown(
     target_dir: Option<String>,
 ) -> Result<disk_analyzer::DiskBreakdownReport, String> {

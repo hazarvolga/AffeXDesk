@@ -489,6 +489,16 @@ export const api = {
     return invoke<FocusModeResult>("activate_focus_mode", { mode });
   },
 
+  getCachedDiskBreakdown(): Promise<{
+    report: DiskBreakdownReport;
+    scanned_at: string;
+  } | null> {
+    return invoke<{
+      report: DiskBreakdownReport;
+      scanned_at: string;
+    } | null>("get_cached_disk_breakdown");
+  },
+
   scanDiskBreakdown(targetDir?: string | null): Promise<DiskBreakdownReport> {
     return invoke<DiskBreakdownReport>("scan_disk_breakdown", {
       targetDir: targetDir ?? null,

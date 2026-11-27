@@ -40,6 +40,7 @@ vi.mock("./lib/api", () => ({
     dockerContainerAction: vi.fn(),
     scanEnvHygiene: vi.fn(),
     activateFocusMode: vi.fn(),
+    getCachedDiskBreakdown: vi.fn(),
     scanDiskBreakdown: vi.fn(),
     movePathToTrash: vi.fn(),
   },
@@ -153,6 +154,7 @@ describe("App", () => {
       fallback: false,
       actions: [],
     });
+    mockedApi.getCachedDiskBreakdown.mockResolvedValue(null);
     mockedApi.scanCreativeCaches.mockResolvedValue([]);
     mockedApi.scanLocalAiModels.mockResolvedValue([]);
     mockedApi.inspectDocker.mockResolvedValue({

@@ -44,21 +44,134 @@ pub struct DiskBreakdownReport {
     pub quick_wins: Vec<DiskEntry>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedDiskBreakdown {
+    pub report: DiskBreakdownReport,
+    pub scanned_at: String,
+}
+
 struct QuickWinsCache {
     fetched_at: Instant,
     items: Vec<DiskEntry>,
 }
 
 static QUICK_WINS_CACHE: OnceLock<Mutex<Option<QuickWinsCache>>> = OnceLock::new();
+static LAST_REPORT_CACHE: OnceLock<Mutex<Option<CachedDiskBreakdown>>> = OnceLock::new();
 
 fn quick_wins_cache() -> &'static Mutex<Option<QuickWinsCache>> {
     QUICK_WINS_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn last_report_cache() -> &'static Mutex<Option<CachedDiskBreakdown>> {
+    LAST_REPORT_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn disk_cache_file_path() -> Option<PathBuf> {
+    let base = dirs::data_local_dir().or_else(dirs::home_dir)?;
+    Some(base.join("affexdesk").join("disk_scan_cache.json"))
+}
+
+pub fn get_cached_disk_breakdown() -> Option<CachedDiskBreakdown> {
+    if let Ok(guard) = last_report_cache().lock() {
+        if let Some(ref cached) = *guard {
+            return Some(cached.clone());
+        }
+    }
+
+    let path = disk_cache_file_path()?;
+    let raw = fs::read_to_string(path).ok()?;
+    let parsed: CachedDiskBreakdown = serde_json::from_str(&raw).ok()?;
+    if let Ok(mut guard) = last_report_cache().lock() {
+        *guard = Some(parsed.clone());
+    }
+    Some(parsed)
+}
+
+fn save_cached_disk_breakdown(report: &DiskBreakdownReport) {
+    let entry = CachedDiskBreakdown {
+        report: report.clone(),
+        scanned_at: chrono::Utc::now().to_rfc3339(),
+    };
+    if let Ok(mut guard) = last_report_cache().lock() {
+        *guard = Some(entry.clone());
+    }
+    if let Some(path) = disk_cache_file_path() {
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string(&entry) {
+            let _ = fs::write(path, json);
+        }
+    }
 }
 
 fn invalidate_quick_wins_cache() {
     if let Ok(mut guard) = quick_wins_cache().lock() {
         *guard = None;
     }
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_tcc_gated(path: &Path, home: Option<&Path>) -> bool {
+    let Some(h) = home else {
+        return false;
+    };
+    let h_norm = normalize_path(h);
+    let p_norm = normalize_path(path);
+    let Ok(rel) = p_norm.strip_prefix(&h_norm) else {
+        return false;
+    };
+    let rel_str = rel.to_string_lossy();
+    let rel_lower = rel_str.to_lowercase();
+
+    // Doğrudan macOS TCC izin penceresi tetikleyen kullanıcı klasörleri
+    if matches!(
+        rel_lower.as_str(),
+        "desktop"
+            | "documents"
+            | "downloads"
+            | "pictures"
+            | "music"
+            | "movies"
+            | ".trash"
+    ) {
+        return true;
+    }
+
+    // ~/Library altındaki TCC korumalı sistem/kişisel veri klasörleri
+    const LIBRARY_TCC_PREFIXES: [&str; 22] = [
+        "library/mail",
+        "library/messages",
+        "library/calendars",
+        "library/contacts",
+        "library/safari",
+        "library/reminders",
+        "library/photos",
+        "library/homekit",
+        "library/suggestions",
+        "library/personalizationportrait",
+        "library/biome",
+        "library/statuskit",
+        "library/trial",
+        "library/metadata",
+        "library/accounts",
+        "library/cookies",
+        "library/containers/com.apple.mail",
+        "library/containers/com.apple.safari",
+        "library/containers/com.apple.photos",
+        "library/application support/mobilesync",
+        "library/application support/addressbook",
+        "library/application support/callhistorydb",
+    ];
+
+    LIBRARY_TCC_PREFIXES
+        .iter()
+        .any(|prefix| rel_lower == *prefix || rel_lower.starts_with(&format!("{prefix}/")))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_macos_tcc_gated(_path: &Path, _home: Option<&Path>) -> bool {
+    false
 }
 
 pub fn category_label(category: &str) -> &'static str {
@@ -354,6 +467,40 @@ fn dir_size_recursive_fs(root: &Path) -> u64 {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn measure_dir_size(path: &Path) -> u64 {
+    // macOS'ta ~/Library doğrudan `du` ile taranırsa Mail/Messages/Safari TCC izin pencereleri açılır.
+    // Bunun yerine yalnızca TCC dışı alt klasörleri ölç.
+    #[cfg(target_os = "macos")]
+    if let Some(home) = dirs::home_dir() {
+        let lib_dir = normalize_path(&home.join("Library"));
+        if normalize_path(path) == lib_dir {
+            let mut sum: u64 = 0;
+            if let Ok(rd) = fs::read_dir(path) {
+                for entry in rd.flatten() {
+                    let child = entry.path();
+                    if is_macos_tcc_gated(&child, Some(&home)) {
+                        continue;
+                    }
+                    if let Ok(m) = fs::symlink_metadata(&child) {
+                        if m.file_type().is_symlink() {
+                            continue;
+                        }
+                        if m.is_dir() {
+                            sum = sum.saturating_add(measure_dir_size_raw(&child));
+                        } else if m.is_file() {
+                            sum = sum.saturating_add(m.len());
+                        }
+                    }
+                }
+            }
+            return sum;
+        }
+    }
+
+    measure_dir_size_raw(path)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn measure_dir_size_raw(path: &Path) -> u64 {
     use std::process::Command;
 
     if let Ok(output) = Command::new("du").args(["-skx"]).arg(path).output() {
@@ -447,12 +594,12 @@ fn scan_quick_wins(home: &Path, disk_used_bytes: u64, force_refresh: bool) -> Ve
         ("macOS Caches", "Library/Caches"),
         ("Xcode DerivedData", "Library/Developer/Xcode/DerivedData"),
         ("Docker Disk İmajı", "Library/Containers/com.docker.docker"),
-        ("Application Support", "Library/Application Support"),
-        ("İndirilenler (Downloads)", "Downloads"),
-        ("Çöp Sepeti (.Trash)", ".Trash"),
         ("Cargo Cache", ".cargo"),
         ("npm Cache", ".npm"),
-        ("Filmler (Movies)", "Movies"),
+        ("pnpm Store", "Library/pnpm/store"),
+        ("Homebrew Cache", "Library/Caches/Homebrew"),
+        ("Gradle Cache", ".gradle"),
+        ("Python / UV Cache", ".cache/uv"),
         ("Geliştirme (dev)", "dev"),
     ];
 
@@ -560,6 +707,9 @@ pub fn scan_disk_breakdown(target_dir: Option<&str>) -> Result<DiskBreakdownRepo
     let mut children: Vec<(String, PathBuf, bool)> = Vec::new();
     for entry in read_dir.flatten() {
         let path = entry.path();
+        if is_macos_tcc_gated(&path, home.as_deref()) {
+            continue;
+        }
         let meta = match fs::symlink_metadata(&path) {
             Ok(m) => m,
             Err(_) => continue,
@@ -660,7 +810,7 @@ pub fn scan_disk_breakdown(target_dir: Option<&str>) -> Result<DiskBreakdownRepo
         Vec::new()
     };
 
-    Ok(DiskBreakdownReport {
+    let report = DiskBreakdownReport {
         root_path,
         parent_path,
         total_scanned_bytes,
@@ -670,7 +820,13 @@ pub fn scan_disk_breakdown(target_dir: Option<&str>) -> Result<DiskBreakdownRepo
         entries,
         category_totals,
         quick_wins,
-    })
+    };
+
+    if is_home_root {
+        save_cached_disk_breakdown(&report);
+    }
+
+    Ok(report)
 }
 
 #[cfg(target_os = "macos")]

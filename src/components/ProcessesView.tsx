@@ -66,7 +66,7 @@ const GENERIC_SUBDIRS = new Set([
   "packages",
 ]);
 
-function resolveProcessOwner(proc: DevProcess): ProcessOwner {
+export function resolveProcessOwner(proc: DevProcess): ProcessOwner {
   const nameLower = proc.name.toLowerCase();
   const cmd = proc.cmd_preview || "";
   const cwd = proc.cwd || "";

@@ -25,6 +25,7 @@ import {
   formatPct,
   formatUptime,
 } from "../lib/format";
+import { resolveProcessOwner } from "./ProcessesView";
 
 export type NavTab = "overview" | "processes" | "projects" | "settings";
 export type ProcessFilter =
@@ -376,35 +377,47 @@ export function OverviewView({
             </p>
           ) : (
             <ul className="summary-list">
-              {topRamProcesses.map((proc) => (
-                <li key={proc.pid} className="summary-row">
-                  <div className="summary-row__main">
-                    <div className="summary-row__title">
-                      <span>{proc.name}</span>
-                      <span className="mono muted">PID {proc.pid}</span>
-                      {proc.is_zombie_candidate && (
-                        <span className="badge badge--danger">
-                          <AlertOctagon size={11} /> Zombi
+              {topRamProcesses.map((proc) => {
+                const owner = resolveProcessOwner(proc);
+                return (
+                  <li key={proc.pid} className="summary-row">
+                    <div className="summary-row__main">
+                      <div className="summary-row__title">
+                        <span>{owner.label}</span>
+                        {owner.label.toLowerCase() !==
+                          proc.name.toLowerCase() && (
+                          <span className="mono muted">{proc.name}</span>
+                        )}
+                        <span className="mono muted">PID {proc.pid}</span>
+                        {proc.is_zombie_candidate && (
+                          <span className="badge badge--danger">
+                            <AlertOctagon size={11} /> Zombi
+                          </span>
+                        )}
+                      </div>
+                      <div className="summary-row__sub">
+                        <span className="badge badge--accent">
+                          {owner.kind}
                         </span>
-                      )}
+                        <span className="badge badge--neutral">
+                          {proc.category}
+                        </span>
+                        {proc.ports.slice(0, 3).map((port) => (
+                          <span key={port} className="port-pill mono">
+                            :{port}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="summary-row__sub">
-                      <span className="badge badge--neutral">
-                        {proc.category}
+                    <div className="summary-row__metric tabular">
+                      <strong>{formatMegabytes(proc.memory_bytes)}</strong>
+                      <span className="muted">
+                        {formatPct(proc.cpu_pct)} CPU
                       </span>
-                      {proc.ports.slice(0, 3).map((port) => (
-                        <span key={port} className="port-pill mono">
-                          :{port}
-                        </span>
-                      ))}
                     </div>
-                  </div>
-                  <div className="summary-row__metric tabular">
-                    <strong>{formatMegabytes(proc.memory_bytes)}</strong>
-                    <span className="muted">{formatPct(proc.cpu_pct)} CPU</span>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

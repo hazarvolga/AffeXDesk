@@ -194,8 +194,8 @@ export function BootSplash({
     let rafId = 0;
     let width = window.innerWidth || 1280;
     let height = window.innerHeight || 800;
-    const colWidth = 24;
-    const charStep = 16;
+    const colWidth = 20;
+    const charStep = 15;
 
     interface MatrixColumn {
       x: number;
@@ -224,11 +224,11 @@ export function BootSplash({
       canvas.style.height = `${height}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-      const count = Math.max(12, Math.floor(width / colWidth));
+      const count = Math.max(16, Math.floor(width / colWidth));
       columns = Array.from({ length: count }, (_, i) => ({
         x: i * colWidth + 10,
         y: Math.random() * height - height * 0.4,
-        speed: 44 + Math.random() * 68,
+        speed: 135 + Math.random() * 155,
         text: pickToken(),
         charIdx: Math.floor(Math.random() * 8),
         accent: i % 3 === 0 ? "cyan" : "emerald",
@@ -247,11 +247,11 @@ export function BootSplash({
       stepAccum += dt;
 
       // Gently fade existing trails using destination-out so the WebGL2 Lidar stays transparent behind it
-      if (stepAccum >= 0.045) {
+      if (stepAccum >= 0.032) {
         stepAccum = 0;
         ctx.save();
         ctx.globalCompositeOperation = "destination-out";
-        ctx.fillStyle = "rgba(0, 0, 0, 0.12)";
+        ctx.fillStyle = "rgba(0, 0, 0, 0.16)";
         ctx.fillRect(0, 0, width, height);
         ctx.restore();
       }
@@ -294,8 +294,8 @@ export function BootSplash({
         }
 
         if (col.y > height + 40) {
-          col.y = -Math.random() * 160;
-          col.speed = 44 + Math.random() * 68;
+          col.y = -Math.random() * 140;
+          col.speed = 135 + Math.random() * 155;
           col.text = pickToken();
           col.charIdx = 0;
         }

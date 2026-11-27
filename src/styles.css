@@ -3511,3 +3511,97 @@ body.is-floating-hud {
   border-color: rgba(16, 185, 129, 0.35);
   background: rgba(16, 185, 129, 0.1);
 }
+
+
+.eq-toggle-btn--fft {
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.sidebar__footer--arcade {
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.sidebar__footer--arcade:hover {
+  background: rgba(56, 189, 248, 0.06);
+}
+
+/* ==========================================================================
+   Hidden Arcade Easter Egg: Card Invaders
+   ========================================================================== */
+.arcade-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 350;
+  background: transparent;
+  overflow: hidden;
+}
+
+.arcade-overlay__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+.arcade-hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  padding: 0 18px;
+  background: rgba(9, 10, 14, 0.88);
+  border-bottom: 1px solid rgba(56, 189, 248, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #e4e4e7;
+}
+
+.arcade-hud__left,
+.arcade-hud__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.arcade-gameover {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 26px 34px;
+  background: #0d0e12;
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 3px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.arcade-gameover h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.2em;
+  color: #f4f4f5;
+}
+
+.arcade-gameover p {
+  margin: 0;
+  font-size: 13px;
+  color: #a1a1aa;
+}
+
+.arcade-gameover__actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 6px;
+}

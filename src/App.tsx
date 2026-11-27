@@ -55,6 +55,7 @@ import { SettingsView } from "./components/SettingsView";
 import { AiDrawer } from "./components/AiDrawer";
 import { BootSplash } from "./components/BootSplash";
 import { EdgeEqualizer } from "./components/EdgeEqualizer";
+import { ArcadeOverlay } from "./components/ArcadeOverlay";
 
 interface ToastMessage {
   id: number;
@@ -103,9 +104,10 @@ export default function App() {
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>("all");
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
   const [floatingHudOpen, setFloatingHudOpen] = useState(false);
-  const [eqEnabled, setEqEnabled] = useState(true);
+  const [eqMode, setEqMode] = useState<"auto" | "live" | "off">("auto");
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [audioTrack, setAudioTrack] = useState<string | null>(null);
+  const [arcadeOpen, setArcadeOpen] = useState(false);
 
   const [version, setVersion] = useState<string>("0.1.0");
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
@@ -576,7 +578,7 @@ export default function App() {
   // Poll macOS/Linux system audio playback (zero microphone permission) for Edge Equalizer
   useEffect(() => {
     const mode = (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE;
-    if (mode === "test" || !eqEnabled) {
+    if (mode === "test" || eqMode === "off") {
       setAudioPlaying(false);
       return;
     }
@@ -599,7 +601,7 @@ export default function App() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [eqEnabled]);
+  }, [eqMode]);
 
   const shellRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -703,7 +705,12 @@ export default function App() {
           onComplete={handleBootComplete}
         />
       )}
-      <EdgeEqualizer playing={audioPlaying} enabled={eqEnabled} />
+      <EdgeEqualizer
+        playing={audioPlaying}
+        enabled={eqMode !== "off"}
+        liveMicReactive={eqMode === "live"}
+      />
+      {arcadeOpen && <ArcadeOverlay onClose={() => setArcadeOpen(false)} />}
       <aside className="sidebar" aria-label="Ana Gezinme">
         <div className="brand">
           <button
@@ -779,7 +786,19 @@ export default function App() {
           <kbd className="nav-kbd">⌘K</kbd>
         </button>
 
-        <div className="sidebar__footer">
+        <div
+          className="sidebar__footer sidebar__footer--arcade"
+          onClick={() => setArcadeOpen(true)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setArcadeOpen(true);
+            }
+          }}
+          title="Gizli Arcade Modu: Card Invaders'ı başlatmak için tıklayın"
+        >
           <div className="status-dot-row">
             <span className="status-dot status-dot--live" />
             <span className="truncate">
@@ -787,21 +806,32 @@ export default function App() {
             </span>
             <button
               type="button"
-              className={`eq-toggle-btn${eqEnabled && audioPlaying ? " eq-toggle-btn--live" : ""}`}
-              onClick={() => setEqEnabled((prev) => !prev)}
+              className={`eq-toggle-btn${
+                eqMode === "live"
+                  ? " eq-toggle-btn--fft"
+                  : eqMode === "auto" && audioPlaying
+                  ? " eq-toggle-btn--live"
+                  : ""
+              }`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setEqMode((prev) =>
+                  prev === "auto" ? "live" : prev === "live" ? "off" : "auto"
+                );
+              }}
               title={
-                eqEnabled
-                  ? audioPlaying
-                    ? `Müzik Equalizer Aktif${audioTrack ? `: ${audioTrack}` : ""} (Kapatmak için tıklayın)`
-                    : "Müzik Equalizer: Otomatik (Müzik çalarken kenarda yanar)"
-                  : "Müzik Equalizer: Kapalı (Açmak için tıklayın)"
+                eqMode === "auto"
+                  ? "Equalizer: Otomatik (Canlı Ritim FFT modu için tıklayın)"
+                  : eqMode === "live"
+                  ? "Equalizer: Canlı Ritim FFT (Mikrofon/Hoparlör ritmine tepki verir — kapatmak için tıklayın)"
+                  : "Equalizer: Kapalı (Açmak için tıklayın)"
               }
-              aria-label="Müzik Equalizer Aç/Kapa"
+              aria-label="Müzik Equalizer Modu"
             >
               <Music size={12} />
             </button>
           </div>
-          {eqEnabled && audioPlaying && audioTrack ? (
+          {eqMode !== "off" && audioPlaying && audioTrack ? (
             <span className="text-cyan mono truncate" style={{ fontSize: 10.5 }} title={audioTrack}>
               ♪ {audioTrack}
             </span>

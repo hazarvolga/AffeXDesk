@@ -124,6 +124,10 @@ function buildBreadcrumbs(rootPath: string): BreadcrumbSegment[] {
   return segments;
 }
 
+function isDockerContainerPath(path: string): boolean {
+  return path.toLowerCase().includes("com.docker.docker");
+}
+
 const DONUT_RADIUS = 82;
 const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 const DISK_CACHE_STORAGE_KEY = "affexdesk.disk_analyzer.last_state.v2";
@@ -977,6 +981,7 @@ export function DiskAnalyzerView({
           <div className="disk-quickwins-grid">
             {report.quick_wins.map((item) => {
               const catStyle = getCategoryStyle(item.category);
+              const isDockerVm = isDockerContainerPath(item.path);
               return (
                 <article key={item.path} className="disk-quickwin-card">
                   <div className="disk-quickwin-card__head">
@@ -993,8 +998,12 @@ export function DiskAnalyzerView({
                       />
                       {catStyle.label}
                     </span>
-                    {item.safe_to_clean && (
-                      <span className="badge badge--success">Güvenli</span>
+                    {isDockerVm ? (
+                      <span className="badge badge--info">Akıllı Temizleyici</span>
+                    ) : (
+                      item.safe_to_clean && (
+                        <span className="badge badge--success">Güvenli</span>
+                      )
                     )}
                   </div>
 
@@ -1010,51 +1019,64 @@ export function DiskAnalyzerView({
                     <span className="mono muted truncate" title={item.path}>
                       {item.path}
                     </span>
-                    {item.clean_hint && (
-                      <p className="disk-quickwin-card__hint">
-                        {item.clean_hint}
-                      </p>
-                    )}
+                    <p className="disk-quickwin-card__hint">
+                      {isDockerVm
+                        ? "Çalışan Docker sanal diski çöpe taşınamaz — Akıllı Temizleyici ile güvenle küçültün."
+                        : item.clean_hint}
+                    </p>
                   </div>
 
                   <div className="disk-quickwin-card__actions">
-                    {item.is_dir && (
+                    {isDockerVm ? (
                       <button
                         type="button"
-                        className="btn btn--secondary btn--sm"
-                        onClick={() => void loadDirectory(item.path)}
-                        disabled={loading}
+                        className="btn btn--primary btn--sm"
+                        onClick={() => setSubTab("cleaner")}
                       >
-                        <FolderOpen size={13} />
-                        <span>İçine Gir</span>
+                        <Sparkles size={13} />
+                        <span>Akıllı Temizleyici ile Temizle</span>
                       </button>
+                    ) : (
+                      <>
+                        {item.is_dir && (
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--sm"
+                            onClick={() => void loadDirectory(item.path)}
+                            disabled={loading}
+                          >
+                            <FolderOpen size={13} />
+                            <span>İçine Gir</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={() => onOpenFinder(item.path)}
+                        >
+                          <span>Finder&apos;da Aç</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--danger-soft btn--sm"
+                          onClick={() => setTrashTarget(item)}
+                          disabled={trashing || permDeleting}
+                        >
+                          <Trash2 size={13} />
+                          <span>Çöpe Taşı</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--danger btn--sm"
+                          onClick={() => openPermanentDelete(item)}
+                          disabled={trashing || permDeleting}
+                          title="Çöp Sepetine taşımadan doğrudan kalıcı sil (2 aşamalı onay)"
+                        >
+                          <Flame size={13} />
+                          <span>Kalıcı Sil</span>
+                        </button>
+                      </>
                     )}
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm"
-                      onClick={() => onOpenFinder(item.path)}
-                    >
-                      <span>Finder&apos;da Aç</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--danger-soft btn--sm"
-                      onClick={() => setTrashTarget(item)}
-                      disabled={trashing || permDeleting}
-                    >
-                      <Trash2 size={13} />
-                      <span>Çöpe Taşı</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--danger btn--sm"
-                      onClick={() => openPermanentDelete(item)}
-                      disabled={trashing || permDeleting}
-                      title="Çöp Sepetine taşımadan doğrudan kalıcı sil (2 aşamalı onay)"
-                    >
-                      <Flame size={13} />
-                      <span>Kalıcı Sil</span>
-                    </button>
                   </div>
                 </article>
               );

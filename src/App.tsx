@@ -634,9 +634,11 @@ export default function App() {
       {bootStage === "splash" && (
         <BootSplash
           version={version}
-          hostname={metrics?.hostname}
-          osName={metrics?.os_name}
-          cpuCores={metrics?.cpu_cores}
+          metrics={metrics}
+          processes={processes}
+          projects={scanReport?.projects ?? []}
+          clients={clients}
+          clientProjectsCount={clientProjects.length}
           onComplete={handleBootComplete}
         />
       )}

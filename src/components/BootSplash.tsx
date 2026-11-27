@@ -1,25 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import gsap from "gsap";
 import { TerminalSquare } from "lucide-react";
+import type {
+  ClientRecord,
+  DevProcessReport,
+  ProjectInfo,
+  SystemMetrics,
+} from "../lib/api";
+import { formatBytes, formatPct } from "../lib/format";
 
 export interface BootSplashProps {
   version: string;
-  hostname?: string | null;
-  osName?: string | null;
-  cpuCores?: number | null;
+  metrics: SystemMetrics | null;
+  processes: DevProcessReport | null;
+  projects: ProjectInfo[];
+  clients: ClientRecord[];
+  clientProjectsCount: number;
   onComplete: () => void;
 }
 
 const TARGET_TITLE = "AFFEXDESK";
 const SCRAMBLE_CHARS = "0123456789ABCDEF/\\-_#";
-
-const SUBSYSTEMS = [
-  { code: "SYS.01", label: "KERNEL TELEMETRY BUS" },
-  { code: "SYS.02", label: "WORKSPACE & GIT GRAPH" },
-  { code: "SYS.03", label: "DOCKER & NVME ANALYZER" },
-  { code: "SYS.04", label: "MISSION CONTROL HUD" },
-];
 
 // Custom GLSL 3D Lidar Tactical Grid + Sweeping Laser Scanner Shader
 const LIDAR_VERTEX_SHADER = /* glsl */ `
@@ -58,7 +60,6 @@ const LIDAR_FRAGMENT_SHADER = /* glsl */ `
   varying float vElev;
 
   void main() {
-    // Crisp dual-resolution millimeter tactical grid
     vec2 major = abs(fract(vWorldPos.xz * 0.5 - 0.5) - 0.5) / fwidth(vWorldPos.xz * 0.5);
     float majorLine = 1.0 - min(min(major.x, major.y), 1.0);
 
@@ -67,17 +68,13 @@ const LIDAR_FRAGMENT_SHADER = /* glsl */ `
 
     float grid = max(majorLine, minorLine);
 
-    // Sweeping laser scanline across Z axis
     float scanDist = abs(vWorldPos.z - uScanZ);
     float laserCore = smoothstep(0.28, 0.0, scanDist);
     float laserTrail = smoothstep(3.4, 0.0, scanDist) * 0.45;
     float scanEnergy = laserCore + laserTrail;
 
-    // Radial radar pulse from center
     float radialDist = length(vWorldPos.xz);
     float pulseRing = smoothstep(0.35, 0.0, abs(radialDist - mod(uTime * 3.8, 16.0))) * 0.4;
-
-    // Distance fog fade
     float distFade = smoothstep(18.0, 2.5, radialDist);
 
     vec3 baseCyan = vec3(0.18, 0.68, 0.94);
@@ -98,14 +95,18 @@ const LIDAR_FRAGMENT_SHADER = /* glsl */ `
 
 export function BootSplash({
   version,
-  hostname,
-  osName,
-  cpuCores,
+  metrics,
+  processes,
+  projects,
+  clients,
+  clientProjectsCount,
   onComplete,
 }: BootSplashProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
+  const leftWingRef = useRef<HTMLDivElement | null>(null);
+  const rightWingRef = useRef<HTMLDivElement | null>(null);
   const reticleRef = useRef<SVGSVGElement | null>(null);
   const shutterTopRef = useRef<HTMLDivElement | null>(null);
   const shutterBotRef = useRef<HTMLDivElement | null>(null);
@@ -113,8 +114,8 @@ export function BootSplash({
 
   const [displayTitle, setDisplayTitle] = useState("0xAF/E9-X");
   const [percent, setPercent] = useState(0);
-  const [lockedCount, setLockedCount] = useState(0);
-  const [scanState, setScanState] = useState<"SCANNING" | "CALIBRATING" | "LOCKED">("SCANNING");
+  const [progressRatio, setProgressRatio] = useState(0);
+  const [scanState, setScanState] = useState<"SCANNING" | "INDEXING" | "LOCKED">("SCANNING");
   const [telemetryCoords, setTelemetryCoords] = useState("AZ 000.0° · EL +18.4°");
 
   const finishedRef = useRef(false);
@@ -135,6 +136,25 @@ export function BootSplash({
       onComplete();
     }
   };
+
+  // Top 8 real projects (prioritizing dirty or largest reclaimable so the scan feels live & useful)
+  const visibleProjects = useMemo(() => {
+    if (projects.length === 0) return [];
+    const sorted = [...projects].sort((a, b) => {
+      if (b.git_dirty_count !== a.git_dirty_count) {
+        return b.git_dirty_count - a.git_dirty_count;
+      }
+      return b.reclaimable_bytes - a.reclaimable_bytes;
+    });
+    return sorted.slice(0, 8);
+  }, [projects]);
+
+  const visibleClients = useMemo(() => clients.slice(0, 6), [clients]);
+
+  const dirtyRepoCount = useMemo(
+    () => projects.filter((p) => p.git_dirty_count > 0).length,
+    [projects]
+  );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -252,7 +272,7 @@ export function BootSplash({
           }
         }
 
-        // 3. Subtle floating horizon laser bar
+        // 3. Sweeping Horizon Laser Bar
         const laserBarGeo = new THREE.PlaneGeometry(24, 0.04);
         geometries.push(laserBarGeo);
         const laserBarMat = new THREE.MeshBasicMaterial({
@@ -322,7 +342,7 @@ export function BootSplash({
       }
     }
 
-    // GSAP Master Spaceship Scanner Timeline (~3.05s)
+    // GSAP Master Spaceship Scanner Timeline (~3.15s)
     const tl = gsap.timeline({
       onComplete: () => {
         if (!finishedRef.current) {
@@ -333,24 +353,21 @@ export function BootSplash({
     });
     timelineRef.current = tl;
 
-    // 1. Tactical camera descent over Lidar plane
     if (camera) {
       tl.to(
         camera.position,
-        { y: 3.1, z: 7.4, duration: 1.7, ease: "expo.out" },
+        { y: 3.1, z: 7.4, duration: 1.75, ease: "expo.out" },
         0
       );
     }
 
-    // 2. Continuous laser sweep front-to-back & back-to-front
     tl.fromTo(
       state,
       { scanZ: -11 },
-      { scanZ: 8, duration: 1.35, ease: "power1.inOut" },
+      { scanZ: 8, duration: 1.4, ease: "power1.inOut" },
       0.05
-    ).to(state, { scanZ: -4, duration: 1.15, ease: "power2.inOut" }, 1.4);
+    ).to(state, { scanZ: -4, duration: 1.2, ease: "power2.inOut" }, 1.45);
 
-    // 3. Center tactical reticle lock-on
     if (reticleRef.current) {
       tl.fromTo(
         reticleRef.current,
@@ -360,29 +377,46 @@ export function BootSplash({
       );
     }
 
-    // 4. Center HUD card reveal
     if (hudRef.current) {
       tl.fromTo(
         hudRef.current,
         { opacity: 0, y: 14 },
         { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" },
-        0.2
+        0.18
       );
     }
 
-    // 5. Scramble decode + live percentage + subsystem checklist lock
+    if (leftWingRef.current) {
+      tl.fromTo(
+        leftWingRef.current,
+        { opacity: 0, x: -28 },
+        { opacity: 1, x: 0, duration: 0.72, ease: "power3.out" },
+        0.24
+      );
+    }
+
+    if (rightWingRef.current) {
+      tl.fromTo(
+        rightWingRef.current,
+        { opacity: 0, x: 28 },
+        { opacity: 1, x: 0, duration: 0.72, ease: "power3.out" },
+        0.28
+      );
+    }
+
+    // Live scanner sweep (0% -> 100%)
     tl.to(
       state,
       {
         progress: 1,
-        duration: 2.15,
+        duration: 2.25,
         ease: "power2.inOut",
         onUpdate: () => {
           const p = state.progress;
           setPercent(Math.round(p * 100));
-          setLockedCount(Math.min(SUBSYSTEMS.length, Math.floor(p * (SUBSYSTEMS.length + 0.35))));
+          setProgressRatio(p);
           if (p > 0.92) setScanState("LOCKED");
-          else if (p > 0.45) setScanState("CALIBRATING");
+          else if (p > 0.35) setScanState("INDEXING");
 
           const az = (p * 360).toFixed(1).padStart(5, "0");
           const el = (18.4 + Math.sin(p * Math.PI * 2) * 4.2).toFixed(1);
@@ -408,49 +442,55 @@ export function BootSplash({
       0.18
     );
 
-    // 6. Target Lock emerald flash + Tactical Shutter Split Reveal
-    tl.to(state, { lockFlash: 1, duration: 0.16, ease: "power2.out" }, 2.35)
-      .to(state, { lockFlash: 0, duration: 0.24 }, 2.51);
+    // Target Lock emerald flash + Tactical Shutter Split Reveal
+    tl.to(state, { lockFlash: 1, duration: 0.16, ease: "power2.out" }, 2.45)
+      .to(state, { lockFlash: 0, duration: 0.24 }, 2.61);
 
     if (camera) {
       tl.to(
         camera.position,
         { y: 1.2, z: 3.4, duration: 0.56, ease: "power3.in" },
-        2.45
+        2.55
       );
+    }
+    if (leftWingRef.current) {
+      tl.to(leftWingRef.current, { opacity: 0, x: -30, duration: 0.34, ease: "power2.in" }, 2.54);
+    }
+    if (rightWingRef.current) {
+      tl.to(rightWingRef.current, { opacity: 0, x: 30, duration: 0.34, ease: "power2.in" }, 2.54);
     }
     if (hudRef.current) {
       tl.to(
         hudRef.current,
         { opacity: 0, scale: 0.97, duration: 0.32, ease: "power2.in" },
-        2.48
+        2.56
       );
     }
     if (reticleRef.current) {
       tl.to(
         reticleRef.current,
         { opacity: 0, scale: 1.18, duration: 0.38, ease: "power2.in" },
-        2.48
+        2.56
       );
     }
     if (shutterTopRef.current && shutterBotRef.current) {
       tl.to(
         shutterTopRef.current,
         { yPercent: -100, duration: 0.44, ease: "expo.inOut" },
-        2.56
+        2.64
       );
       tl.to(
         shutterBotRef.current,
         { yPercent: 100, duration: 0.44, ease: "expo.inOut" },
-        2.56
+        2.64
       );
     }
-    tl.to(state, { opacity: 0, duration: 0.42, ease: "power2.in" }, 2.55);
+    tl.to(state, { opacity: 0, duration: 0.42, ease: "power2.in" }, 2.62);
     if (rootRef.current) {
       tl.to(
         rootRef.current,
         { opacity: 0, duration: 0.34, ease: "power2.inOut" },
-        2.7
+        2.78
       );
     }
 
@@ -473,9 +513,54 @@ export function BootSplash({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const nodeLabel = (hostname || "LOCAL-BRIDGE").toUpperCase();
-  const osLabel = (osName || "MACOS WORKSTATION").toUpperCase();
-  const coresLabel = cpuCores ? `${cpuCores}-CORE SILICON` : "MULTI-CORE BUS";
+  const nodeLabel = (metrics?.hostname || "LOCAL-BRIDGE").toUpperCase();
+  const osLabel = (metrics?.os_name || "MACOS WORKSTATION").toUpperCase();
+  const coresLabel = metrics?.cpu_cores
+    ? `${metrics.cpu_cores}-CORE SILICON`
+    : "MULTI-CORE BUS";
+
+  const activeRepoIdx =
+    visibleProjects.length > 0
+      ? Math.min(visibleProjects.length, Math.floor(progressRatio * (visibleProjects.length + 0.6)))
+      : 0;
+
+  const activeClientIdx =
+    visibleClients.length > 0
+      ? Math.min(visibleClients.length, Math.floor(progressRatio * (visibleClients.length + 0.6)))
+      : 0;
+
+  const subsystemRows = [
+    {
+      code: "SYS.01",
+      label: "TELEMETRY BUS",
+      ready: progressRatio > 0.22 && Boolean(metrics),
+      badge: metrics ? `${formatBytes(metrics.disk_available_bytes)} FREE` : "PROBING",
+    },
+    {
+      code: "SYS.02",
+      label: "WORKSPACE REPOS",
+      ready: progressRatio > 0.45,
+      badge:
+        projects.length > 0
+          ? `${projects.length} REPOS${dirtyRepoCount > 0 ? ` · ${dirtyRepoCount} DIRTY` : ""}`
+          : "INDEXING",
+    },
+    {
+      code: "SYS.03",
+      label: "CLIENT REGISTRY",
+      ready: progressRatio > 0.68,
+      badge:
+        clients.length > 0
+          ? `${clients.length} CLIENTS · ${clientProjectsCount} LINKED`
+          : "STANDBY",
+    },
+    {
+      code: "SYS.04",
+      label: "DEV PROCESSES",
+      ready: progressRatio > 0.86,
+      badge: processes ? `${processes.processes.length} ACTIVE` : "PROBING",
+    },
+  ];
 
   return (
     <div
@@ -500,10 +585,131 @@ export function BootSplash({
       <div ref={shutterBotRef} className="boot-shutter boot-shutter--bottom" aria-hidden="true">
         <div className="boot-shutter__row mono">
           <span>OS // {osLabel}</span>
-          <span>LIDAR GRID · WEBGL2</span>
+          <span>LIVE WORKSPACE LIDAR · WEBGL2</span>
           <span>ESC / CLICK TO BYPASS</span>
         </div>
       </div>
+
+      {/* Left Wing: Live Discovered Repositories */}
+      <aside ref={leftWingRef} className="boot-wing boot-wing--left mono" aria-hidden="true">
+        <div className="boot-wing__head">
+          <span>REPOS // LIVE SCAN</span>
+          <span className="text-cyan tabular">{projects.length}</span>
+        </div>
+        <div className="boot-feed">
+          {visibleProjects.length === 0 ? (
+            <div className="boot-feed__empty">
+              {progressRatio > 0.7 ? "NO WORKSPACES MOUNTED" : "SCANNING DEV ROOTS..."}
+            </div>
+          ) : (
+            visibleProjects.map((proj, idx) => {
+              const scanned = idx < activeRepoIdx;
+              const scanningNow = idx === activeRepoIdx && progressRatio < 0.98;
+              return (
+                <div
+                  key={proj.path}
+                  className={`boot-feed__row ${
+                    scanned
+                      ? "boot-feed__row--done"
+                      : scanningNow
+                      ? "boot-feed__row--active"
+                      : ""
+                  }`}
+                >
+                  <span className="boot-feed__name truncate">{proj.name}</span>
+                  <span className="boot-feed__meta">
+                    {proj.git_branch ? proj.git_branch : "local"}
+                  </span>
+                  <span
+                    className={`boot-feed__tag ${
+                      !scanned
+                        ? ""
+                        : proj.git_dirty_count > 0
+                        ? "boot-feed__tag--warn"
+                        : "boot-feed__tag--ok"
+                    }`}
+                  >
+                    {!scanned
+                      ? scanningNow
+                        ? "SCAN"
+                        : "WAIT"
+                      : proj.git_dirty_count > 0
+                      ? `${proj.git_dirty_count}D`
+                      : "OK"}
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </aside>
+
+      {/* Right Wing: Live Clients & Hardware Readout */}
+      <aside ref={rightWingRef} className="boot-wing boot-wing--right mono" aria-hidden="true">
+        <div className="boot-wing__head">
+          <span>TELEMETRY // LIVE</span>
+          <span className="text-emerald">ONLINE</span>
+        </div>
+        <div className="boot-telem-grid">
+          <div className="boot-telem-cell">
+            <span>CPU</span>
+            <strong>{metrics ? formatPct(metrics.cpu_usage_pct) : "--"}</strong>
+          </div>
+          <div className="boot-telem-cell">
+            <span>RAM</span>
+            <strong>{metrics ? formatBytes(metrics.mem_used_bytes) : "--"}</strong>
+          </div>
+          <div className="boot-telem-cell">
+            <span>DISK FREE</span>
+            <strong className="text-emerald">
+              {metrics ? formatBytes(metrics.disk_available_bytes) : "--"}
+            </strong>
+          </div>
+          <div className="boot-telem-cell">
+            <span>PROCS</span>
+            <strong>{processes ? processes.processes.length : "--"}</strong>
+          </div>
+        </div>
+
+        <div className="boot-wing__head boot-wing__head--sub">
+          <span>CLIENTS // REGISTRY</span>
+          <span className="text-cyan tabular">{clients.length}</span>
+        </div>
+        <div className="boot-feed">
+          {visibleClients.length === 0 ? (
+            <div className="boot-feed__empty">CLIENT REGISTRY READY</div>
+          ) : (
+            visibleClients.map((client, idx) => {
+              const scanned = idx < activeClientIdx;
+              const scanningNow = idx === activeClientIdx && progressRatio < 0.98;
+              return (
+                <div
+                  key={client.id}
+                  className={`boot-feed__row ${
+                    scanned
+                      ? "boot-feed__row--done"
+                      : scanningNow
+                      ? "boot-feed__row--active"
+                      : ""
+                  }`}
+                >
+                  <span className="boot-feed__name truncate">{client.name}</span>
+                  <span className="boot-feed__meta truncate">
+                    {(client.remote_tool || "LOCAL").toUpperCase()}
+                  </span>
+                  <span
+                    className={`boot-feed__tag ${
+                      scanned ? "boot-feed__tag--ok" : ""
+                    }`}
+                  >
+                    {scanned ? "SYNC" : scanningNow ? "PING" : "WAIT"}
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </aside>
 
       {/* Precision Spaceship Tactical Scanner Reticle SVG */}
       <svg
@@ -513,19 +719,16 @@ export function BootSplash({
         fill="none"
         aria-hidden="true"
       >
-        {/* Outer degree brackets */}
         <path d="M90 140 L90 90 L140 90" stroke="rgba(56,189,248,0.55)" strokeWidth="1.5" />
         <path d="M380 90 L430 90 L430 140" stroke="rgba(56,189,248,0.55)" strokeWidth="1.5" />
         <path d="M90 380 L90 430 L140 430" stroke="rgba(56,189,248,0.55)" strokeWidth="1.5" />
         <path d="M380 430 L430 430 L430 380" stroke="rgba(56,189,248,0.55)" strokeWidth="1.5" />
 
-        {/* Precision ruler ticks */}
         <line x1="260" y1="62" x2="260" y2="86" stroke="rgba(56,189,248,0.7)" strokeWidth="1" />
         <line x1="260" y1="434" x2="260" y2="458" stroke="rgba(56,189,248,0.7)" strokeWidth="1" />
         <line x1="62" y1="260" x2="86" y2="260" stroke="rgba(56,189,248,0.7)" strokeWidth="1" />
         <line x1="434" y1="260" x2="458" y2="260" stroke="rgba(56,189,248,0.7)" strokeWidth="1" />
 
-        {/* Segmented technical compass arc (static, precision HUD) */}
         <circle
           cx="260"
           cy="260"
@@ -543,7 +746,6 @@ export function BootSplash({
           strokeDasharray="40 20 8 20"
         />
 
-        {/* Degree markers */}
         <text x="260" y="52" textAnchor="middle" fill="rgba(56,189,248,0.65)" fontSize="9" fontFamily="monospace">000°</text>
         <text x="476" y="263" textAnchor="start" fill="rgba(56,189,248,0.65)" fontSize="9" fontFamily="monospace">090°</text>
         <text x="260" y="476" textAnchor="middle" fill="rgba(56,189,248,0.65)" fontSize="9" fontFamily="monospace">180°</text>
@@ -572,21 +774,16 @@ export function BootSplash({
         </div>
 
         <div className="boot-checklist mono">
-          {SUBSYSTEMS.map((sub, idx) => {
-            const ok = idx < lockedCount;
-            return (
-              <div
-                key={sub.code}
-                className={`boot-checklist__row ${ok ? "boot-checklist__row--ok" : ""}`}
-              >
-                <span className="boot-checklist__code">{sub.code}</span>
-                <span className="boot-checklist__label">{sub.label}</span>
-                <span className="boot-checklist__state">
-                  {ok ? "[OK]" : "[..]"}
-                </span>
-              </div>
-            );
-          })}
+          {subsystemRows.map((sub) => (
+            <div
+              key={sub.code}
+              className={`boot-checklist__row ${sub.ready ? "boot-checklist__row--ok" : ""}`}
+            >
+              <span className="boot-checklist__code">{sub.code}</span>
+              <span className="boot-checklist__label">{sub.label}</span>
+              <span className="boot-checklist__state">{sub.badge}</span>
+            </div>
+          ))}
         </div>
 
         <div className="boot-splash__bar-wrap">

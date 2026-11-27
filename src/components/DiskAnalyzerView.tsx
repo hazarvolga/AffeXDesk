@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
+  ChevronDown,
   ChevronRight,
   Cpu,
   File,
@@ -269,6 +270,7 @@ export function DiskAnalyzerView({
   const [aiFilter, setAiFilter] = useState<
     "all" | "unused" | "incomplete" | "active"
   >("all");
+  const [aiModelsExpanded, setAiModelsExpanded] = useState(false);
 
   const loadRequestIdRef = useRef(0);
   const mountedRef = useRef(true);
@@ -1128,10 +1130,25 @@ export function DiskAnalyzerView({
                 />
                 <span>Yenile</span>
               </button>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => setAiModelsExpanded((prev) => !prev)}
+                aria-expanded={aiModelsExpanded}
+              >
+                {aiModelsExpanded ? (
+                  <ChevronDown size={13} />
+                ) : (
+                  <ChevronRight size={13} />
+                )}
+                <span>{aiModelsExpanded ? "Gizle" : "Listeyi Aç"}</span>
+              </button>
             </div>
           </div>
 
-          <div className="ai-filter-row" role="group" aria-label="AI Model Filtresi">
+          {aiModelsExpanded && (
+            <>
+              <div className="ai-filter-row" role="group" aria-label="AI Model Filtresi">
             {(
               [
                 ["all", `Tümü (${aiModels.length})`],
@@ -1249,6 +1266,8 @@ export function DiskAnalyzerView({
                 );
               })}
             </div>
+          )}
+            </>
           )}
         </section>
       )}

@@ -78,8 +78,18 @@ fn parse_gh_user(output: &str) -> Option<String> {
     None
 }
 
+fn extended_path_env() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    if cfg!(target_os = "macos") {
+        format!("/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{current}")
+    } else {
+        current
+    }
+}
+
 pub fn check_git_providers(settings: &HashMap<String, String>) -> GitProviderStatus {
     let (gh_cli_available, gh_authenticated, gh_user) = match Command::new("gh")
+        .env("PATH", extended_path_env())
         .args(["auth", "status"])
         .output()
     {
@@ -275,6 +285,7 @@ async fn list_github_repos(settings: &HashMap<String, String>) -> Result<Vec<Rem
     }
 
     let output = tokio::process::Command::new("gh")
+        .env("PATH", extended_path_env())
         .args(["api", "user/repos?per_page=50&sort=updated"])
         .output()
         .await
@@ -437,6 +448,7 @@ pub fn clone_repo(
         .ok_or_else(|| "Target path is not valid UTF-8".to_string())?;
 
     let output = Command::new("git")
+        .env("PATH", extended_path_env())
         .args(["clone", "--", &safe_url, target_str])
         .output()
         .map_err(|e| format!("Failed to execute git clone: {e}"))?;
@@ -573,6 +585,7 @@ pub fn create_local_project(
     }
 
     let git_init = Command::new("git")
+        .env("PATH", extended_path_env())
         .args(["init", "-b", "main"])
         .current_dir(&project_dir)
         .output()
@@ -588,6 +601,7 @@ pub fn create_local_project(
     if create_github_remote {
         let visibility_flag = if private { "--private" } else { "--public" };
         let gh_out = Command::new("gh")
+            .env("PATH", extended_path_env())
             .args([
                 "repo",
                 "create",

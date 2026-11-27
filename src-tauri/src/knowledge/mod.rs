@@ -166,7 +166,7 @@ fn read_dataset_cards(datasets_dir: &Path) -> Vec<DatasetCard> {
         });
     }
 
-    cards.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
+    cards.sort_by_key(|a| a.id.to_lowercase());
     cards
 }
 
@@ -453,6 +453,15 @@ fn rust_fallback_search(exports_dir: &Path, query: &str, limit: usize) -> Vec<Kn
         .collect()
 }
 
+fn extended_path_env() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    if cfg!(target_os = "macos") {
+        format!("/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{current}")
+    } else {
+        current
+    }
+}
+
 pub fn search_knowledge_hub(
     root_dir: &str,
     query: &str,
@@ -478,10 +487,12 @@ pub fn search_knowledge_hub(
 
     if script_path.is_file() {
         if let Ok(output) = Command::new("python3")
+            .env("PATH", extended_path_env())
             .arg(&script_path)
             .arg("search")
-            .arg(trimmed_query)
             .arg("--compact")
+            .arg("--")
+            .arg(trimmed_query)
             .output()
         {
             if output.status.success() {

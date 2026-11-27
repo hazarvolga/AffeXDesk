@@ -182,16 +182,17 @@ fn validate_cleanable_path(raw: &str) -> Result<PathBuf, String> {
     }
 
     let path = Path::new(trimmed);
+    if !path.is_absolute() {
+        return Err(format!("forbidden_path: relative path not allowed ({trimmed})"));
+    }
 
     for comp in path.components() {
         match comp {
             Component::ParentDir => {
                 return Err(format!("forbidden_path: path traversal in {trimmed}"));
             }
-            Component::Normal(seg) => {
-                if seg == ".git" {
-                    return Err(format!("forbidden_path: .git is protected ({trimmed})"));
-                }
+            Component::Normal(seg) if seg == ".git" => {
+                return Err(format!("forbidden_path: .git is protected ({trimmed})"));
             }
             _ => {}
         }
@@ -217,9 +218,25 @@ fn validate_cleanable_path(raw: &str) -> Result<PathBuf, String> {
         ));
     }
 
-    if let Ok(meta) = fs::symlink_metadata(path) {
-        if meta.file_type().is_symlink() {
-            return Err(format!("forbidden_path: symlink not allowed ({trimmed})"));
+    // Reject symlinks on the target itself or any non-OS-root ancestor directory
+    for ancestor in path.ancestors() {
+        if ancestor.parent().is_none() || ancestor.as_os_str().is_empty() {
+            break;
+        }
+        #[cfg(target_os = "macos")]
+        if matches!(
+            ancestor.to_str(),
+            Some("/var" | "/tmp" | "/etc")
+        ) {
+            continue;
+        }
+        if let Ok(meta) = fs::symlink_metadata(ancestor) {
+            if meta.file_type().is_symlink() {
+                return Err(format!(
+                    "forbidden_path: symlink not allowed ({})",
+                    ancestor.display()
+                ));
+            }
         }
     }
 
@@ -621,7 +638,7 @@ fn scan_reclaimable_dirs(project_dir: &Path) -> (u64, Vec<ReclaimableDir>) {
     let mut found = Vec::new();
     collect_reclaimable(project_dir, 0, &mut found);
 
-    found.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    found.sort_by_key(|a| std::cmp::Reverse(a.size_bytes));
     let total = found.iter().map(|d| d.size_bytes).sum();
     (total, found)
 }
@@ -813,6 +830,32 @@ mod tests {
         let traversal = format!("{}/../node_modules", root.display());
         let trav_err = clean_reclaimable_paths(&[traversal]).expect_err("must reject .. traversal");
         assert!(trav_err.starts_with("forbidden_path:"));
+
+        let rel_err = clean_reclaimable_paths(&["node_modules".to_string()])
+            .expect_err("must reject relative path");
+        assert!(rel_err.starts_with("forbidden_path:"));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let real_nm = root.join("real_target");
+            fs::create_dir_all(&real_nm).expect("create real_target");
+            let sym_nm = root.join("node_modules");
+            symlink(&real_nm, &sym_nm).expect("create symlink node_modules");
+            let sym_err = clean_reclaimable_paths(&[sym_nm.to_string_lossy().to_string()])
+                .expect_err("must reject symlink target");
+            assert!(sym_err.starts_with("forbidden_path:"));
+            assert!(real_nm.exists());
+
+            let sym_parent = root.join("sym_parent");
+            symlink(&root, &sym_parent).expect("create symlink parent");
+            let sym_parent_err = clean_reclaimable_paths(&[sym_parent
+                .join("dist")
+                .to_string_lossy()
+                .to_string()])
+            .expect_err("must reject symlink ancestor");
+            assert!(sym_parent_err.starts_with("forbidden_path:"));
+        }
 
         let _ = fs::remove_dir_all(&root);
     }

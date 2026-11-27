@@ -53,7 +53,7 @@ fn last_cleaner_cache() -> &'static Mutex<Option<CleanerScanReport>> {
 
 fn cleaner_cache_file_path() -> Option<PathBuf> {
     let base = dirs::data_local_dir().or_else(dirs::home_dir)?;
-    Some(base.join("affexdesk").join("cleaner_scan_cache.json"))
+    Some(base.join("AffeXDesk").join("cleaner_scan_cache.json"))
 }
 
 pub fn get_cached_cleaner_scan() -> Option<CleanerScanReport> {
@@ -346,10 +346,12 @@ fn app_updater_cache_dirs(home: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     for entry in rd.flatten() {
         let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-        if name.ends_with("-updater") || name.contains("updater") {
+        if name.ends_with("-updater") {
             let path = entry.path();
-            if path.is_dir() {
-                found.push(path);
+            if let Ok(meta) = fs::symlink_metadata(&path) {
+                if !meta.file_type().is_symlink() && meta.is_dir() {
+                    found.push(path);
+                }
             }
         }
     }
@@ -357,17 +359,51 @@ fn app_updater_cache_dirs(home: &Path) -> Vec<PathBuf> {
 }
 
 fn clear_directory_contents(dir: &Path) -> Result<(), String> {
-    if !dir.exists() {
-        return Ok(());
+    let meta = match fs::symlink_metadata(dir) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("Klasör bilgisi alınamadı ({}): {e}", dir.display())),
+    };
+    if meta.file_type().is_symlink() {
+        return Err(format!("Güvenlik hatası: Symlink dizin temizlenemez ({})", dir.display()));
     }
+    if !meta.is_dir() {
+        return Err(format!("Hedef bir klasör değil ({})", dir.display()));
+    }
+
     let rd = fs::read_dir(dir).map_err(|e| format!("Klasör okunamadı ({}): {e}", dir.display()))?;
-    for entry in rd.flatten() {
+    let mut errors: Vec<String> = Vec::new();
+    for entry_res in rd {
+        let entry = match entry_res {
+            Ok(e) => e,
+            Err(e) => {
+                errors.push(format!("girdi okunamadı: {e}"));
+                continue;
+            }
+        };
         let p = entry.path();
-        if p.is_dir() && !p.is_symlink() {
-            let _ = fs::remove_dir_all(&p);
+        let entry_meta = match fs::symlink_metadata(&p) {
+            Ok(m) => m,
+            Err(e) => {
+                errors.push(format!("{}: {e}", p.display()));
+                continue;
+            }
+        };
+        let remove_res = if entry_meta.file_type().is_symlink() || !entry_meta.is_dir() {
+            fs::remove_file(&p)
         } else {
-            let _ = fs::remove_file(&p);
+            fs::remove_dir_all(&p)
+        };
+        if let Err(e) = remove_res {
+            errors.push(format!("{}: {e}", p.display()));
         }
+    }
+    if !errors.is_empty() {
+        return Err(format!(
+            "Bazı öğeler silinemedi ({}): {}",
+            dir.display(),
+            errors.join("; ")
+        ));
     }
     Ok(())
 }
@@ -404,11 +440,11 @@ pub fn scan_system_cleaner() -> Result<CleanerScanReport, String> {
                     unused, docker.images_total_count
                 ),
                 category: "docker".to_string(),
-                risk: "safe".to_string(),
+                risk: "review".to_string(),
                 size_bytes: docker.images_reclaimable_bytes,
-                default_selected: true,
+                default_selected: false,
                 path_hint: Some("docker image prune -a -f".to_string()),
-                note: Some("Çalışan konteynerlerin imajlarına dokunmaz; eski imajları temizler.".to_string()),
+                note: Some("Çalışan konteynerlerin imajlarına dokunmaz; durmuş projelerin imajlarını kaldırır (yeniden indirme gerektirebilir).".to_string()),
             });
         }
         if docker.containers_stopped_count > 0 {
@@ -417,11 +453,11 @@ pub fn scan_system_cleaner() -> Result<CleanerScanReport, String> {
                 title: "Durmuş Docker Konteynerleri".to_string(),
                 subtitle: format!("{} durmuş konteyner", docker.containers_stopped_count),
                 category: "docker".to_string(),
-                risk: "safe".to_string(),
+                risk: "review".to_string(),
                 size_bytes: docker.containers_reclaimable_bytes.max(1024),
-                default_selected: true,
+                default_selected: false,
                 path_hint: Some("docker container prune -f".to_string()),
-                note: Some("Yalnızca çalışmayan (exited) konteynerleri kaldırır.".to_string()),
+                note: Some("Çalışmayan (exited) konteynerleri kaldırır; durdurulmuş proje ortamlarını kontrol ederek seçin.".to_string()),
             });
         }
         if docker.volumes_reclaimable_bytes > 0 {
@@ -429,15 +465,15 @@ pub fn scan_system_cleaner() -> Result<CleanerScanReport, String> {
                 id: "docker_unused_volumes".to_string(),
                 title: "Kullanılmayan Docker Volume'leri".to_string(),
                 subtitle: format!(
-                    "{} bağlı olmayan volume (veritabanı/veri içerebilir)",
+                    "{} bağlı olmayan volume (yalnızca dangling anonim volume'ler temizlenir)",
                     docker.volumes_unused_count
                 ),
                 category: "docker".to_string(),
                 risk: "review".to_string(),
                 size_bytes: docker.volumes_reclaimable_bytes,
                 default_selected: false,
-                path_hint: Some("docker volume prune -a -f".to_string()),
-                note: Some("DİKKAT: Eski lokal PostgreSQL/Redis/n8n/Dify test veritabanlarını içerebilir. Saklamak istediğiniz bir DB yoksa seçin.".to_string()),
+                path_hint: Some("docker volume prune -f".to_string()),
+                note: Some("Yalnızca sahipsiz (dangling) anonim volume'leri temizler; adlandırılmış volume'ler korunur. Durmuş konteyner temizliği ile aynı anda çalıştırılamaz.".to_string()),
             });
         }
     }
@@ -639,6 +675,10 @@ pub fn run_system_cleaner(item_ids: &[String]) -> Result<CleanerRunReport, Strin
     let mut failed = 0usize;
     let mut needs_docker_restart = false;
 
+    let has_stopped_containers = item_ids
+        .iter()
+        .any(|raw| raw.trim() == "docker_stopped_containers");
+
     for raw_id in item_ids {
         let id = raw_id.trim();
         let res = match id {
@@ -715,27 +755,37 @@ pub fn run_system_cleaner(item_ids: &[String]) -> Result<CleanerRunReport, Strin
                 }
             }
             "docker_unused_volumes" => {
-                let before = inspect_docker_df().volumes_reclaimable_bytes;
-                match run_cli("docker", &["volume", "prune", "-a", "-f"]) {
-                    Ok(_) => {
-                        let after = inspect_docker_df().volumes_reclaimable_bytes;
-                        let freed = before.saturating_sub(after);
-                        needs_docker_restart = true;
-                        CleanerRunItemResult {
-                            id: id.to_string(),
-                            title: "Kullanılmayan Docker Volume'leri".to_string(),
-                            ok: true,
-                            freed_bytes: freed,
-                            message: "Bağlı olmayan Docker volume'leri temizlendi.".to_string(),
-                        }
-                    }
-                    Err(e) => CleanerRunItemResult {
+                if has_stopped_containers {
+                    CleanerRunItemResult {
                         id: id.to_string(),
                         title: "Kullanılmayan Docker Volume'leri".to_string(),
                         ok: false,
                         freed_bytes: 0,
-                        message: e,
-                    },
+                        message: "Güvenlik kilidi: Durmuş konteyner temizliği ile volume temizliği aynı anda çalıştırılamaz".to_string(),
+                    }
+                } else {
+                    let before = inspect_docker_df().volumes_reclaimable_bytes;
+                    match run_cli("docker", &["volume", "prune", "-f"]) {
+                        Ok(_) => {
+                            let after = inspect_docker_df().volumes_reclaimable_bytes;
+                            let freed = before.saturating_sub(after);
+                            needs_docker_restart = true;
+                            CleanerRunItemResult {
+                                id: id.to_string(),
+                                title: "Kullanılmayan Docker Volume'leri".to_string(),
+                                ok: true,
+                                freed_bytes: freed,
+                                message: "Sahipsiz (dangling) anonim Docker volume'leri temizlendi.".to_string(),
+                            }
+                        }
+                        Err(e) => CleanerRunItemResult {
+                            id: id.to_string(),
+                            title: "Kullanılmayan Docker Volume'leri".to_string(),
+                            ok: false,
+                            freed_bytes: 0,
+                            message: e,
+                        },
+                    }
                 }
             }
             "pnpm_store" => {
@@ -855,17 +905,25 @@ pub fn run_system_cleaner(item_ids: &[String]) -> Result<CleanerRunReport, Strin
             "app_updaters_cache" => {
                 let dirs = app_updater_cache_dirs(&home);
                 let before: u64 = dirs.iter().map(|p| measure_dir_fast(p)).sum();
+                let mut errors: Vec<String> = Vec::new();
                 for d in &dirs {
-                    let _ = clear_directory_contents(d);
+                    if let Err(e) = clear_directory_contents(d) {
+                        errors.push(e);
+                    }
                 }
                 let after: u64 = dirs.iter().map(|p| measure_dir_fast(p)).sum();
                 let freed = before.saturating_sub(after);
+                let ok = errors.is_empty();
                 CleanerRunItemResult {
                     id: id.to_string(),
                     title: "Eski Uygulama Güncelleyici Kalıntıları".to_string(),
-                    ok: true,
+                    ok,
                     freed_bytes: freed,
-                    message: format!("{} güncelleyici önbelleği temizlendi.", dirs.len()),
+                    message: if ok {
+                        format!("{} güncelleyici önbelleği temizlendi.", dirs.len())
+                    } else {
+                        errors.join(" | ")
+                    },
                 }
             }
             "ms_playwright_cache" => {
@@ -887,17 +945,25 @@ pub fn run_system_cleaner(item_ids: &[String]) -> Result<CleanerRunReport, Strin
             "browser_caches" => {
                 let paths = browser_cache_paths(&home);
                 let before: u64 = paths.iter().map(|p| measure_dir_fast(p)).sum();
+                let mut errors: Vec<String> = Vec::new();
                 for d in &paths {
-                    let _ = clear_directory_contents(d);
+                    if let Err(e) = clear_directory_contents(d) {
+                        errors.push(e);
+                    }
                 }
                 let after: u64 = paths.iter().map(|p| measure_dir_fast(p)).sum();
                 let freed = before.saturating_sub(after);
+                let ok = errors.is_empty();
                 CleanerRunItemResult {
                     id: id.to_string(),
                     title: "Tarayıcı Önbellekleri".to_string(),
-                    ok: true,
+                    ok,
                     freed_bytes: freed,
-                    message: "Tarayıcı geçici önbellekleri temizlendi.".to_string(),
+                    message: if ok {
+                        "Tarayıcı geçici önbellekleri temizlendi.".to_string()
+                    } else {
+                        errors.join(" | ")
+                    },
                 }
             }
             unknown => CleanerRunItemResult {
@@ -919,6 +985,7 @@ pub fn run_system_cleaner(item_ids: &[String]) -> Result<CleanerRunReport, Strin
     }
 
     invalidate_cleaner_cache();
+    crate::disk_analyzer::invalidate_all_disk_caches();
 
     Ok(CleanerRunReport {
         total_freed_bytes,
@@ -993,5 +1060,35 @@ mod tests {
         assert_eq!(rep.succeeded, 0);
         assert_eq!(rep.failed, 1);
         assert!(!rep.results[0].ok);
+    }
+
+    #[test]
+    fn clear_directory_contents_rejects_symlinks_and_cache_uses_affexdesk_dir() {
+        if let Some(p) = cleaner_cache_file_path() {
+            assert!(p.to_string_lossy().contains("AffeXDesk"));
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let base = std::env::temp_dir().join(format!("affexdesk_cleaner_sym_{nanos}"));
+            let real_dir = base.join("real");
+            let link_dir = base.join("link-updater");
+            fs::create_dir_all(&real_dir).unwrap();
+            fs::write(real_dir.join("keep.txt"), b"keep").unwrap();
+            symlink(&real_dir, &link_dir).unwrap();
+
+            let err = clear_directory_contents(&link_dir).expect_err("symlink dir must be rejected");
+            assert!(err.contains("Symlink"));
+            assert!(real_dir.join("keep.txt").exists());
+
+            let _ = fs::remove_dir_all(&base);
+        }
     }
 }

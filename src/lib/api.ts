@@ -512,8 +512,8 @@ export const api = {
   dockerContainerAction(
     id: string,
     action: "start" | "stop" | "restart"
-  ): Promise<void> {
-    return invoke<void>("docker_container_action", { id, action });
+  ): Promise<string> {
+    return invoke<string>("docker_container_action", { id, action });
   },
 
   scanEnvHygiene(): Promise<EnvHygieneItem[]> {

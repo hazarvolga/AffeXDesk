@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -12,6 +12,7 @@ import {
   Sparkles,
   Square,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   api,
@@ -26,14 +27,17 @@ export interface SmartCleanerPanelProps {
   onOpenFinder: (path: string) => void;
   onRefreshTelemetry: () => Promise<void>;
   onNotify: (tone: "success" | "error" | "info", text: string) => void;
+  onCleaned?: () => void;
 }
 
 let cachedCleanerReport: CleanerScanReport | null = null;
 let inFlightCleanerScan: Promise<CleanerScanReport> | null = null;
+let cachedLastCleanerRun: CleanerRunReport | null = null;
 
 export function clearSmartCleanerUiCache(): void {
   cachedCleanerReport = null;
   inFlightCleanerScan = null;
+  cachedLastCleanerRun = null;
 }
 
 function formatScanClock(iso: string | null | undefined): string | null {
@@ -54,6 +58,7 @@ export function SmartCleanerPanel({
   onOpenFinder,
   onRefreshTelemetry,
   onNotify,
+  onCleaned,
 }: SmartCleanerPanelProps) {
   const [report, setReport] = useState<CleanerScanReport | null>(
     () => cachedCleanerReport
@@ -69,7 +74,24 @@ export function SmartCleanerPanel({
   const [cleaning, setCleaning] = useState(false);
   const [restartingDocker, setRestartingDocker] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [lastRun, setLastRun] = useState<CleanerRunReport | null>(null);
+  const [lastRun, setLastRun] = useState<CleanerRunReport | null>(
+    () => cachedLastCleanerRun
+  );
+
+  const scanRequestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const updateLastRun = useCallback((next: CleanerRunReport | null) => {
+    cachedLastCleanerRun = next;
+    setLastRun(next);
+  }, []);
 
   const applyReport = useCallback((next: CleanerScanReport) => {
     cachedCleanerReport = next;
@@ -85,21 +107,31 @@ export function SmartCleanerPanel({
         applyReport(cachedCleanerReport);
         return;
       }
+      const reqId = ++scanRequestIdRef.current;
       setScanning(true);
+      let pending: Promise<CleanerScanReport> | null = null;
       try {
-        let pending = !force ? inFlightCleanerScan : null;
+        pending = !force ? inFlightCleanerScan : null;
         if (!pending) {
           pending = api.scanSystemCleaner();
           inFlightCleanerScan = pending;
         }
         const data = await pending;
-        inFlightCleanerScan = null;
+        if (inFlightCleanerScan === pending) {
+          inFlightCleanerScan = null;
+        }
+        if (!mountedRef.current || scanRequestIdRef.current !== reqId) return;
         applyReport(data);
       } catch (err) {
-        inFlightCleanerScan = null;
+        if (pending && inFlightCleanerScan === pending) {
+          inFlightCleanerScan = null;
+        }
+        if (!mountedRef.current || scanRequestIdRef.current !== reqId) return;
         onNotify("error", `Temizleyici taraması başarısız: ${String(err)}`);
       } finally {
-        setScanning(false);
+        if (mountedRef.current && scanRequestIdRef.current === reqId) {
+          setScanning(false);
+        }
       }
     },
     [applyReport, onNotify]
@@ -176,7 +208,7 @@ export function SmartCleanerPanel({
     setCleaning(true);
     try {
       const result = await api.runSystemCleaner(selectedIds);
-      setLastRun(result);
+      updateLastRun(result);
       setConfirmOpen(false);
       if (result.succeeded > 0) {
         onNotify(
@@ -187,6 +219,7 @@ export function SmartCleanerPanel({
         onNotify("error", "Seçilen kalemler temizlenemedi.");
       }
       cachedCleanerReport = null;
+      onCleaned?.();
       await Promise.all([runScan(true), onRefreshTelemetry()]);
     } catch (err) {
       onNotify("error", `Temizlik başarısız: ${String(err)}`);
@@ -194,7 +227,7 @@ export function SmartCleanerPanel({
     } finally {
       setCleaning(false);
     }
-  }, [selectedIds, onNotify, runScan, onRefreshTelemetry]);
+  }, [selectedIds, updateLastRun, onNotify, onCleaned, runScan, onRefreshTelemetry]);
 
   const handleRestartDocker = useCallback(async () => {
     setRestartingDocker(true);
@@ -344,43 +377,86 @@ export function SmartCleanerPanel({
       </section>
 
       {/* Son Temizlik Raporu & Docker.raw Küçültme Aksiyonu */}
-      {lastRun && (
-        <div className="cleaner-result-banner" role="status">
-          <div className="cleaner-result-banner__left">
-            <CheckCircle2 size={16} className="text-emerald" />
-            <div>
-              <strong>
-                {formatBytes(lastRun.total_freed_bytes)} geri kazanıldı
-              </strong>{" "}
-              <span className="muted">
-                ({lastRun.succeeded} başarılı
-                {lastRun.failed > 0 ? `, ${lastRun.failed} başarısız` : ""})
-              </span>
-              {lastRun.needs_docker_restart && (
-                <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
-                  macOS'ta <code>Docker.raw</code> sanal diskinin fiziksel olarak
-                  küçülmesi için Docker Desktop'ı yeniden başlatın.
-                </p>
+      {lastRun && (() => {
+        const isAllFailed = lastRun.succeeded === 0 && lastRun.failed > 0;
+        const failedResults = lastRun.results.filter((r) => !r.ok);
+        return (
+          <div
+            className={`cleaner-result-banner${
+              isAllFailed ? " cleaner-result-banner--error" : ""
+            }`}
+            role={isAllFailed ? "alert" : "status"}
+          >
+            <div className="cleaner-result-banner__left">
+              {isAllFailed ? (
+                <AlertTriangle size={16} className="text-danger" />
+              ) : (
+                <CheckCircle2 size={16} className="text-emerald" />
               )}
+              <div>
+                {isAllFailed ? (
+                  <>
+                    <strong>Temizlik başarısız oldu</strong>{" "}
+                    <span className="muted">
+                      ({lastRun.failed} kalem temizlenemedi)
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <strong>
+                      {formatBytes(lastRun.total_freed_bytes)} geri kazanıldı
+                    </strong>{" "}
+                    <span className="muted">
+                      ({lastRun.succeeded} başarılı
+                      {lastRun.failed > 0 ? `, ${lastRun.failed} başarısız` : ""})
+                    </span>
+                  </>
+                )}
+                {failedResults.length > 0 && (
+                  <ul className="cleaner-result-banner__errors">
+                    {failedResults.map((item) => (
+                      <li key={item.id}>
+                        <strong>{item.title}:</strong> {item.message}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {lastRun.needs_docker_restart && (
+                  <p className="muted" style={{ margin: "3px 0 0", fontSize: 12 }}>
+                    macOS'ta <code>Docker.raw</code> sanal diskinin fiziksel olarak
+                    küçülmesi için Docker Desktop'ı yeniden başlatın.
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="cleaner-result-banner__actions">
+              {lastRun.needs_docker_restart && (
+                <button
+                  type="button"
+                  className="btn btn--sm btn--secondary"
+                  disabled={restartingDocker}
+                  onClick={() => void handleRestartDocker()}
+                >
+                  <RotateCw size={13} className={restartingDocker ? "spin" : ""} />
+                  <span>
+                    {restartingDocker
+                      ? "Yeniden Başlatılıyor..."
+                      : "Docker Desktop'ı Yeniden Başlat"}
+                  </span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Sonucu kapat"
+                onClick={() => updateLastRun(null)}
+              >
+                <X size={14} />
+              </button>
             </div>
           </div>
-          {lastRun.needs_docker_restart && (
-            <button
-              type="button"
-              className="btn btn--sm btn--secondary"
-              disabled={restartingDocker}
-              onClick={() => void handleRestartDocker()}
-            >
-              <RotateCw size={13} className={restartingDocker ? "spin" : ""} />
-              <span>
-                {restartingDocker
-                  ? "Yeniden Başlatılıyor..."
-                  : "Docker Desktop'ı Yeniden Başlat"}
-              </span>
-            </button>
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Kontrol Çubuğu */}
       <div className="cleaner-toolbar">

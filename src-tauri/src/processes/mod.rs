@@ -343,16 +343,40 @@ pub fn kill_dev_process(pid: u32, force: bool) -> Result<(), String> {
 
     let mut sys = System::new();
     let target = Pid::from_u32(pid);
-    sys.refresh_processes(ProcessesToUpdate::Some(&[target]), true);
+    let refresh_kind = ProcessRefreshKind::new().with_cmd(UpdateKind::OnlyIfNotSet);
+    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[target]), true, refresh_kind);
 
     let Some(process) = sys.process(target) else {
         return Err(format!("process_not_found:{pid}"));
     };
 
-    let signal = if force { Signal::Kill } else { Signal::Term };
-    let killed = process
-        .kill_with(signal)
-        .unwrap_or_else(|| process.kill());
+    let name = process.name().to_string_lossy().to_string();
+    let cmd_joined = process
+        .cmd()
+        .iter()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cmd_preview = if cmd_joined.is_empty() {
+        name.clone()
+    } else {
+        cmd_joined
+    };
+
+    if classify_dev_process(&name, &cmd_preview).is_none() {
+        return Err("not_a_dev_process".to_string());
+    }
+
+    let killed = if force {
+        process
+            .kill_with(Signal::Kill)
+            .unwrap_or_else(|| process.kill())
+    } else {
+        match process.kill_with(Signal::Term) {
+            Some(ok) => ok,
+            None => return Err(format!("sigterm_unsupported:{pid}")),
+        }
+    };
 
     if killed {
         Ok(())

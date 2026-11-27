@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   ChevronRight,
@@ -137,8 +137,8 @@ const directoryScanCache = new Map<string, CachedDiskScan>();
 let lastDiskScanState: CachedDiskScan | null = null;
 const inFlightScans = new Map<string, Promise<DiskBreakdownReport>>();
 
-function cacheKeyForDir(dir: string | null): string {
-  return dir ?? "__HOME__";
+function cacheKeyForDir(dir: string | null, includeProtected = false): string {
+  return `${dir ?? "__HOME__"}::${includeProtected ? "full" : "safe"}`;
 }
 
 function readPersistedDiskScan(): CachedDiskScan | null {
@@ -152,7 +152,10 @@ function readPersistedDiskScan(): CachedDiskScan | null {
       return null;
     }
     lastDiskScanState = parsed;
-    directoryScanCache.set(cacheKeyForDir(parsed.currentDir), parsed);
+    directoryScanCache.set(
+      cacheKeyForDir(parsed.currentDir, Boolean(parsed.includeProtected)),
+      parsed
+    );
     return parsed;
   } catch {
     return null;
@@ -161,7 +164,10 @@ function readPersistedDiskScan(): CachedDiskScan | null {
 
 function persistDiskScan(entry: CachedDiskScan): void {
   lastDiskScanState = entry;
-  directoryScanCache.set(cacheKeyForDir(entry.currentDir), entry);
+  directoryScanCache.set(
+    cacheKeyForDir(entry.currentDir, Boolean(entry.includeProtected)),
+    entry
+  );
   try {
     if (typeof window !== "undefined" && window.localStorage) {
       window.localStorage.setItem(DISK_CACHE_STORAGE_KEY, JSON.stringify(entry));
@@ -227,13 +233,25 @@ export function DiskAnalyzerView({
   const [trashTarget, setTrashTarget] = useState<DiskEntry | null>(null);
   const [trashing, setTrashing] = useState(false);
 
+  const loadRequestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const loadDirectory = useCallback(
     async (
       targetDir: string | null,
       options?: { force?: boolean; includeProtected?: boolean }
     ) => {
       const useFull = options?.includeProtected ?? fullDiskMode;
-      const key = `${cacheKeyForDir(targetDir)}::${useFull ? "full" : "safe"}`;
+      const key = cacheKeyForDir(targetDir, useFull);
+      const reqId = ++loadRequestIdRef.current;
+
       if (!options?.force) {
         const cached = directoryScanCache.get(key);
         if (cached) {
@@ -243,20 +261,25 @@ export function DiskAnalyzerView({
           setScannedAt(cached.scannedAt);
           setSelectedCategory(null);
           setError(null);
+          setLoading(false);
           return;
         }
       }
 
       setLoading(true);
       setError(null);
+      let pending: Promise<DiskBreakdownReport> | undefined;
       try {
-        let pending = !options?.force ? inFlightScans.get(key) : undefined;
+        pending = !options?.force ? inFlightScans.get(key) : undefined;
         if (!pending) {
           pending = api.scanDiskBreakdown(targetDir, useFull);
           inFlightScans.set(key, pending);
         }
         const data = await pending;
-        inFlightScans.delete(key);
+        if (inFlightScans.get(key) === pending) {
+          inFlightScans.delete(key);
+        }
+        if (!mountedRef.current || loadRequestIdRef.current !== reqId) return;
         const nowIso = new Date().toISOString();
         const entry: CachedDiskScan = {
           currentDir: targetDir,
@@ -264,19 +287,23 @@ export function DiskAnalyzerView({
           scannedAt: nowIso,
           includeProtected: useFull,
         };
-        directoryScanCache.set(key, entry);
         persistDiskScan(entry);
         setReport(data);
         setCurrentDir(targetDir);
         setScannedAt(nowIso);
         setSelectedCategory(null);
       } catch (err) {
-        inFlightScans.delete(key);
+        if (pending && inFlightScans.get(key) === pending) {
+          inFlightScans.delete(key);
+        }
+        if (!mountedRef.current || loadRequestIdRef.current !== reqId) return;
         const msg = String(err);
         setError(msg);
         onNotify("error", `Disk taraması başarısız: ${msg}`);
       } finally {
-        setLoading(false);
+        if (mountedRef.current && loadRequestIdRef.current === reqId) {
+          setLoading(false);
+        }
       }
     },
     [fullDiskMode, onNotify]
@@ -290,9 +317,6 @@ export function DiskAnalyzerView({
         fda = await api.checkFullDiskAccess();
         if (!cancelled) {
           setHasFullDiskAccess(fda);
-          if (fda) {
-            setFullDiskMode(true);
-          }
         }
       } catch {
         // yoksay
@@ -304,25 +328,25 @@ export function DiskAnalyzerView({
         const backendCached = await api.getCachedDiskBreakdown();
         if (cancelled) return;
         if (backendCached && backendCached.report) {
+          const includeProtected = Boolean(backendCached.include_protected);
           const entry: CachedDiskScan = {
             currentDir: null,
             report: backendCached.report,
             scannedAt: backendCached.scanned_at,
-            includeProtected: Boolean(backendCached.include_protected),
+            includeProtected,
           };
           persistDiskScan(entry);
           setReport(entry.report);
           setCurrentDir(null);
           setScannedAt(entry.scannedAt);
-          if (backendCached.include_protected) {
-            setFullDiskMode(true);
-          }
+          setFullDiskMode(includeProtected);
           return;
         }
       } catch {
         // Disk önbelleği okunamazsa ilk taramaya düş
       }
       if (!cancelled) {
+        setFullDiskMode(fda);
         void loadDirectory(null, { includeProtected: fda });
       }
     })();
@@ -363,7 +387,7 @@ export function DiskAnalyzerView({
         )}).`
       );
       setTrashTarget(null);
-      directoryScanCache.clear();
+      clearDiskAnalyzerCache();
       await Promise.all([
         loadDirectory(currentDir, { force: true }),
         onRefreshTelemetry(),
@@ -445,38 +469,40 @@ export function DiskAnalyzerView({
               : "Disk doluluğunu kategorilere ayırın, klasörlerin içine girin ve güvenle Çöp Sepetine taşıyın"}
           </p>
         </div>
-        <div className="header-actions">
-          <button
-            type="button"
-            className={`btn ${fullDiskMode ? "btn--primary" : "btn--ghost"}`}
-            onClick={handleToggleFullDiskMode}
-            disabled={loading}
-            title="Movies, Downloads, Documents, Desktop, .Trash ve /Applications dahil tüm diski tara"
-          >
-            {fullDiskMode ? <ShieldCheck size={14} /> : <Lock size={14} />}
-            <span>
-              {fullDiskMode ? "Tam Disk Modu: Açık" : "Tam Disk Modu (Tümü)"}
-            </span>
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => void loadDirectory(null)}
-            disabled={loading || currentDir === null}
-          >
-            <Home size={14} />
-            <span>Ev Dizini</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={() => void loadDirectory(currentDir, { force: true })}
-            disabled={loading}
-          >
-            <RefreshCw size={15} className={loading ? "spin" : ""} />
-            <span>{loading ? "Taranıyor..." : "Yeniden Tara"}</span>
-          </button>
-        </div>
+        {subTab === "map" && (
+          <div className="header-actions">
+            <button
+              type="button"
+              className={`btn ${fullDiskMode ? "btn--primary" : "btn--ghost"}`}
+              onClick={handleToggleFullDiskMode}
+              disabled={loading}
+              title="Movies, Downloads, Documents, Desktop, .Trash ve /Applications dahil tüm diski tara"
+            >
+              {fullDiskMode ? <ShieldCheck size={14} /> : <Lock size={14} />}
+              <span>
+                {fullDiskMode ? "Tam Disk Modu: Açık" : "Tam Disk Modu (Tümü)"}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => void loadDirectory(null)}
+              disabled={loading || currentDir === null}
+            >
+              <Home size={14} />
+              <span>Ev Dizini</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => void loadDirectory(currentDir, { force: true })}
+              disabled={loading}
+            >
+              <RefreshCw size={15} className={loading ? "spin" : ""} />
+              <span>{loading ? "Taranıyor..." : "Yeniden Tara"}</span>
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="subtabs-bar" role="tablist" aria-label="Disk Analizi Sekmeleri">
@@ -485,7 +511,12 @@ export function DiskAnalyzerView({
           role="tab"
           aria-selected={subTab === "map"}
           className={`subtab-btn ${subTab === "map" ? "subtab-btn--active" : ""}`}
-          onClick={() => setSubTab("map")}
+          onClick={() => {
+            setSubTab("map");
+            if (!report && !loading) {
+              void loadDirectory(currentDir, { force: true });
+            }
+          }}
         >
           <PieChart size={14} />
           <span>Disk Haritası & Gezgin</span>
@@ -507,6 +538,10 @@ export function DiskAnalyzerView({
           onOpenFinder={onOpenFinder}
           onRefreshTelemetry={onRefreshTelemetry}
           onNotify={onNotify}
+          onCleaned={() => {
+            clearDiskAnalyzerCache();
+            setReport(null);
+          }}
         />
       ) : (
         <>

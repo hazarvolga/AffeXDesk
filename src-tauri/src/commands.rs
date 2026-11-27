@@ -129,9 +129,14 @@ pub async fn scan_workspaces(
 
 #[tauri::command]
 pub async fn clean_project_caches(paths: Vec<String>) -> Result<workspace::CleanResult, String> {
-    tokio::task::spawn_blocking(move || workspace::clean_reclaimable_paths(&paths))
-        .await
-        .map_err(|err| format!("cache cleanup task failed: {err}"))?
+    tokio::task::spawn_blocking(move || {
+        let result = workspace::clean_reclaimable_paths(&paths)?;
+        disk_analyzer::invalidate_all_disk_caches();
+        cleaner::invalidate_cleaner_cache();
+        Ok(result)
+    })
+    .await
+    .map_err(|err| format!("cache cleanup task failed: {err}"))?
 }
 
 #[tauri::command]

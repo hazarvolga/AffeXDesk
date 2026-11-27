@@ -93,6 +93,7 @@ pub fn open_full_disk_access_settings() -> Result<(), String> {
 
 struct QuickWinsCache {
     fetched_at: Instant,
+    include_protected: bool,
     items: Vec<DiskEntry>,
 }
 
@@ -109,7 +110,7 @@ fn last_report_cache() -> &'static Mutex<Option<CachedDiskBreakdown>> {
 
 fn disk_cache_file_path() -> Option<PathBuf> {
     let base = dirs::data_local_dir().or_else(dirs::home_dir)?;
-    Some(base.join("affexdesk").join("disk_scan_cache.json"))
+    Some(base.join("AffeXDesk").join("disk_scan_cache.json"))
 }
 
 pub fn get_cached_disk_breakdown() -> Option<CachedDiskBreakdown> {
@@ -147,9 +148,15 @@ fn save_cached_disk_breakdown(report: &DiskBreakdownReport, include_protected: b
     }
 }
 
-fn invalidate_quick_wins_cache() {
+pub fn invalidate_all_disk_caches() {
+    if let Ok(mut guard) = last_report_cache().lock() {
+        *guard = None;
+    }
     if let Ok(mut guard) = quick_wins_cache().lock() {
         *guard = None;
+    }
+    if let Some(path) = disk_cache_file_path() {
+        let _ = fs::remove_file(path);
     }
 }
 
@@ -164,19 +171,22 @@ fn is_macos_tcc_gated(path: &Path, home: Option<&Path>) -> bool {
         return false;
     };
     let rel_str = rel.to_string_lossy();
-    let rel_lower = rel_str.to_lowercase();
+    let rel_lower = rel_str.replace('\\', "/").to_lowercase();
 
-    // Doğrudan macOS TCC izin penceresi tetikleyen kullanıcı klasörleri
-    if matches!(
-        rel_lower.as_str(),
-        "desktop"
-            | "documents"
-            | "downloads"
-            | "pictures"
-            | "music"
-            | "movies"
-            | ".trash"
-    ) {
+    // Doğrudan macOS TCC izin penceresi tetikleyen kullanıcı klasörleri ve alt yolları
+    const USER_TCC_ROOTS: [&str; 7] = [
+        "desktop",
+        "documents",
+        "downloads",
+        "pictures",
+        "music",
+        "movies",
+        ".trash",
+    ];
+    if USER_TCC_ROOTS
+        .iter()
+        .any(|root| rel_lower == *root || rel_lower.starts_with(&format!("{root}/")))
+    {
         return true;
     }
 
@@ -229,9 +239,16 @@ pub fn category_label(category: &str) -> &'static str {
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
     let mut normalized = PathBuf::new();
     for comp in path.components() {
-        normalized.push(comp.as_os_str());
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
     }
     normalized
 }
@@ -259,6 +276,8 @@ fn protected_paths_for_home(home: Option<&Path>) -> Vec<PathBuf> {
         for sub in [
             "Desktop",
             "Documents",
+            "Downloads",
+            "Movies",
             "Library",
             "dev",
             "Pictures",
@@ -276,6 +295,49 @@ fn protected_paths_for_home(home: Option<&Path>) -> Vec<PathBuf> {
     protected
 }
 
+fn protected_prefix_paths_for_home(home: Option<&Path>) -> Vec<PathBuf> {
+    let mut prefixes: Vec<PathBuf> = vec![
+        PathBuf::from("/System"),
+        PathBuf::from("/usr"),
+        PathBuf::from("/bin"),
+        PathBuf::from("/sbin"),
+        PathBuf::from("/etc"),
+        PathBuf::from("/var"),
+        PathBuf::from("/private"),
+        PathBuf::from("/Applications"),
+    ];
+
+    if let Some(h) = home {
+        let h_norm = normalize_path(h);
+        prefixes.push(h_norm.join(".ssh"));
+        prefixes.push(h_norm.join(".gnupg"));
+        prefixes.push(h_norm.join("Library").join("Keychains"));
+    }
+
+    prefixes
+}
+
+fn is_protected_windows_path(raw: &str) -> bool {
+    let normalized = raw
+        .trim()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase();
+
+    if normalized == "c:" || normalized == "c:/users" {
+        return true;
+    }
+
+    const WINDOWS_PREFIXES: [&str; 3] = [
+        "c:/windows",
+        "c:/program files",
+        "c:/program files (x86)",
+    ];
+    WINDOWS_PREFIXES
+        .iter()
+        .any(|prefix| normalized == *prefix || normalized.starts_with(&format!("{prefix}/")))
+}
+
 pub fn is_protected_path(path: &Path) -> bool {
     let home = dirs::home_dir();
     is_protected_path_with_home(path, home.as_deref())
@@ -284,6 +346,10 @@ pub fn is_protected_path(path: &Path) -> bool {
 fn is_protected_path_with_home(path: &Path, home: Option<&Path>) -> bool {
     let raw = path.to_string_lossy().trim().to_string();
     if raw.is_empty() {
+        return true;
+    }
+
+    if is_protected_windows_path(&raw) {
         return true;
     }
 
@@ -302,6 +368,24 @@ fn is_protected_path_with_home(path: &Path, home: Option<&Path>) -> bool {
             }
             if let Ok(p_canon) = fs::canonicalize(p) {
                 if *c == normalize_path(&p_canon) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    let prefixes = protected_prefix_paths_for_home(home);
+    for prefix in &prefixes {
+        let p_norm = normalize_path(prefix);
+        if norm.starts_with(&p_norm) {
+            return true;
+        }
+        if let Some(ref c) = canonical {
+            if c.starts_with(&p_norm) {
+                return true;
+            }
+            if let Ok(p_canon) = fs::canonicalize(prefix) {
+                if c.starts_with(normalize_path(&p_canon)) {
                     return true;
                 }
             }
@@ -514,8 +598,14 @@ fn measure_dir_size(path: &Path, include_protected: bool) -> u64 {
     #[cfg(target_os = "macos")]
     if !include_protected {
         if let Some(home) = dirs::home_dir() {
+            if is_macos_tcc_gated(path, Some(&home)) {
+                return 0;
+            }
+            let norm = normalize_path(path);
             let lib_dir = normalize_path(&home.join("Library"));
-            if normalize_path(path) == lib_dir {
+            let app_support_dir = normalize_path(&home.join("Library/Application Support"));
+            let containers_dir = normalize_path(&home.join("Library/Containers"));
+            if norm == lib_dir || norm == app_support_dir || norm == containers_dir {
                 let mut sum: u64 = 0;
                 if let Ok(rd) = fs::read_dir(path) {
                     for entry in rd.flatten() {
@@ -528,7 +618,12 @@ fn measure_dir_size(path: &Path, include_protected: bool) -> u64 {
                                 continue;
                             }
                             if m.is_dir() {
-                                sum = sum.saturating_add(measure_dir_size_raw(&child));
+                                let child_norm = normalize_path(&child);
+                                if child_norm == app_support_dir || child_norm == containers_dir {
+                                    sum = sum.saturating_add(measure_dir_size(&child, false));
+                                } else {
+                                    sum = sum.saturating_add(measure_dir_size_raw(&child));
+                                }
                             } else if m.is_file() {
                                 sum = sum.saturating_add(m.len());
                             }
@@ -590,7 +685,7 @@ fn measure_paths_parallel(items: &[(String, PathBuf, bool)], include_protected: 
 
     let results: Vec<Mutex<u64>> = (0..len).map(|_| Mutex::new(0)).collect();
     let cursor = AtomicUsize::new(0);
-    let worker_count = len.min(MAX_SCAN_THREADS).max(1);
+    let worker_count = len.clamp(1, MAX_SCAN_THREADS);
 
     std::thread::scope(|scope| {
         for _ in 0..worker_count {
@@ -629,7 +724,9 @@ fn scan_quick_wins(
     if !force_refresh {
         if let Ok(guard) = quick_wins_cache().lock() {
             if let Some(ref cached) = *guard {
-                if cached.fetched_at.elapsed() < Duration::from_secs(QUICK_WINS_CACHE_TTL_SECS) {
+                if cached.include_protected == include_protected
+                    && cached.fetched_at.elapsed() < Duration::from_secs(QUICK_WINS_CACHE_TTL_SECS)
+                {
                     return cached.items.clone();
                 }
             }
@@ -730,6 +827,7 @@ fn scan_quick_wins(
     if let Ok(mut guard) = quick_wins_cache().lock() {
         *guard = Some(QuickWinsCache {
             fetched_at: Instant::now(),
+            include_protected,
             items: items.clone(),
         });
     }
@@ -898,7 +996,11 @@ pub fn scan_disk_breakdown(
             Vec::new()
         }
     } else if let Ok(guard) = quick_wins_cache().lock() {
-        guard.as_ref().map(|c| c.items.clone()).unwrap_or_default()
+        guard
+            .as_ref()
+            .filter(|c| c.include_protected == include_protected)
+            .map(|c| c.items.clone())
+            .unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -922,11 +1024,6 @@ pub fn scan_disk_breakdown(
     Ok(report)
 }
 
-#[cfg(target_os = "macos")]
-fn escape_applescript_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
 pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -940,11 +1037,29 @@ pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
         return Err("protected_path".to_string());
     }
 
-    if !target.exists() {
-        return Err(format!("Yol bulunamadı: {}", target.to_string_lossy()));
+    let meta = match fs::symlink_metadata(&target) {
+        Ok(m) => m,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!("Yol bulunamadı: {}", target.to_string_lossy()));
+        }
+        Err(err) => {
+            return Err(format!(
+                "Yol bilgisi alınamadı ({}): {err}",
+                target.to_string_lossy()
+            ));
+        }
+    };
+
+    if meta.file_type().is_symlink() {
+        return Err("symlink_not_allowed".to_string());
     }
 
-    let canonical = fs::canonicalize(&target).unwrap_or(target);
+    let canonical = fs::canonicalize(&target).map_err(|err| {
+        format!(
+            "Yol çözümlenemedi ({}): {err}",
+            target.to_string_lossy()
+        )
+    })?;
     if is_protected_path_with_home(&canonical, home.as_deref()) {
         return Err("protected_path".to_string());
     }
@@ -955,10 +1070,17 @@ pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
     {
         use std::process::Command;
 
-        let escaped = escape_applescript_string(&canonical.to_string_lossy());
-        let script = format!("tell application \"Finder\" to delete POSIX file \"{escaped}\"");
         let output = Command::new("osascript")
-            .args(["-e", &script])
+            .args([
+                "-e",
+                "on run argv",
+                "-e",
+                "tell application \"Finder\" to delete POSIX file (item 1 of argv)",
+                "-e",
+                "end run",
+                "--",
+            ])
+            .arg(&canonical)
             .output()
             .map_err(|err| format!("Finder Çöp Sepeti komutu çalıştırılamadı: {err}"))?;
 
@@ -974,6 +1096,7 @@ pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
 
         let gio_ok = Command::new("gio")
             .arg("trash")
+            .arg("--")
             .arg(&canonical)
             .status()
             .map(|s| s.success())
@@ -981,35 +1104,49 @@ pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
 
         if !gio_ok {
             let trash_put_ok = Command::new("trash-put")
+                .arg("--")
                 .arg(&canonical)
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false);
 
             if !trash_put_ok {
-                if canonical.is_dir() {
-                    fs::remove_dir_all(&canonical)
-                        .map_err(|err| format!("Klasör silinemedi: {err}"))?;
-                } else {
-                    fs::remove_file(&canonical)
-                        .map_err(|err| format!("Dosya silinemedi: {err}"))?;
-                }
+                return Err("trash_unavailable".to_string());
             }
         }
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
     {
-        if canonical.is_dir() {
-            fs::remove_dir_all(&canonical)
-                .map_err(|err| format!("Klasör silinemedi: {err}"))?;
-        } else {
-            fs::remove_file(&canonical)
-                .map_err(|err| format!("Dosya silinemedi: {err}"))?;
+        use std::process::Command;
+
+        let script = r#"
+Add-Type -AssemblyName Microsoft.VisualBasic
+$p = $env:AFFEX_TRASH_PATH
+if (Test-Path -LiteralPath $p -PathType Container) {
+    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
+} else {
+    [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin')
+}
+"#;
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", script])
+            .env("AFFEX_TRASH_PATH", &canonical)
+            .output()
+            .map_err(|err| format!("Windows Geri Dönüşüm Kutusu komutu çalıştırılamadı: {err}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(format!("Geri Dönüşüm Kutusuna taşınamadı: {stderr}"));
         }
     }
 
-    invalidate_quick_wins_cache();
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        return Err("trash_unavailable".to_string());
+    }
+
+    invalidate_all_disk_caches();
     Ok(reclaimed_bytes)
 }
 
@@ -1138,7 +1275,7 @@ mod tests {
         assert_eq!(report.entries[1].name, "node_modules");
         assert_eq!(report.entries[1].category, "dev_cache");
         assert!(report.entries[1].is_dir);
-        assert!(report.entries[1].safe_to_clean);
+        assert_eq!(report.entries[1].safe_to_clean, !is_protected_path(&sub_dir));
 
         assert_eq!(report.entries[2].name, "notes.txt");
         assert_eq!(report.entries[2].category, "other");
@@ -1161,5 +1298,69 @@ mod tests {
         assert!(report.parent_path.is_some());
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn protected_paths_cover_prefixes_windows_roots_and_user_roots() {
+        let fake_home = Path::new("/Users/tester");
+
+        // Prefix protection
+        assert!(is_protected_path_with_home(Path::new("/System/Library/CoreServices"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/etc/hosts"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/Applications/Safari.app"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/usr/local/bin"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/private/var/db"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/.ssh/id_ed25519"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/.gnupg/pubring.kbx"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/Library/Keychains/login.keychain-db"), Some(fake_home)));
+
+        // Windows system roots
+        assert!(is_protected_path_with_home(Path::new("C:\\"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("C:\\Windows\\System32"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("C:\\Program Files\\App"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("C:\\Program Files (x86)\\App"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("C:\\Users"), Some(fake_home)));
+        assert!(!is_protected_path_with_home(Path::new("C:\\Users\\tester\\Downloads\\old.zip"), Some(fake_home)));
+
+        // Downloads & Movies root protection (but allow children)
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/Downloads"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/Movies"), Some(fake_home)));
+        assert!(!is_protected_path_with_home(Path::new("/Users/tester/Downloads/old.dmg"), Some(fake_home)));
+        assert!(!is_protected_path_with_home(Path::new("/Users/tester/Movies/CacheClip"), Some(fake_home)));
+
+        // Parent traversal cannot bypass protection
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/Downloads/../.ssh/id_rsa"), Some(fake_home)));
+
+        #[cfg(target_os = "macos")]
+        {
+            assert!(is_macos_tcc_gated(Path::new("/Users/tester/Desktop/report.pdf"), Some(fake_home)));
+            assert!(is_macos_tcc_gated(Path::new("/Users/tester/Documents/sub/file.txt"), Some(fake_home)));
+            assert!(is_macos_tcc_gated(Path::new("/Users/tester/Library/Application Support/MobileSync/Backup"), Some(fake_home)));
+            assert!(!is_macos_tcc_gated(Path::new("/Users/tester/Library/Caches/Homebrew"), Some(fake_home)));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn move_path_to_trash_rejects_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let home = dirs::home_dir().expect("home dir");
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = home.join(format!(".affexdesk_test_trash_sym_{}_{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create test dir");
+        let real_file = dir.join("real.txt");
+        let link_file = dir.join("link.txt");
+        fs::write(&real_file, b"hello").expect("write real");
+        symlink(&real_file, &link_file).expect("create symlink");
+
+        let res = move_path_to_trash(&link_file.to_string_lossy());
+        assert_eq!(res, Err("symlink_not_allowed".to_string()));
+        assert!(real_file.exists());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

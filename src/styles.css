@@ -89,6 +89,10 @@ button {
   color: var(--accent-emerald);
 }
 
+.text-danger {
+  color: var(--accent-danger);
+}
+
 /* Shell Layout */
 .app-shell {
   display: grid;
@@ -352,6 +356,22 @@ button {
 .btn--warning {
   background: #d97706;
   color: #fff;
+}
+
+.btn--warning:hover:not(:disabled) {
+  background: #b45309;
+}
+
+.btn:focus-visible,
+.icon-btn:focus-visible,
+.nav-item:focus-visible,
+.subtab-btn:focus-visible,
+.pill:focus-visible,
+.link-btn:focus-visible,
+.ops-tile:focus-visible,
+.metric-card--interactive:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
 }
 
 .btn--warning-soft {
@@ -1191,7 +1211,7 @@ button {
   position: fixed;
   right: 24px;
   bottom: 24px;
-  z-index: 90;
+  z-index: 150;
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -2204,7 +2224,7 @@ button {
 }
 
 .ops-tile:hover,
-.metric-card--clickable:hover,
+.metric-card--interactive:hover,
 .disk-quickwin-card:hover {
   transform: none;
   border-color: var(--border-strong);
@@ -2492,4 +2512,26 @@ button.telemetry-ribbon__item:hover {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+}
+
+.cleaner-result-banner--error {
+  border-color: rgba(244, 63, 94, 0.42);
+  border-left-color: var(--accent-danger);
+}
+
+.cleaner-result-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cleaner-result-banner__errors {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: #fecdd3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }

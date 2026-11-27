@@ -335,6 +335,15 @@ fn resolve_ffprobe_binary() -> &'static str {
     }
 }
 
+fn extended_path_env() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    if cfg!(target_os = "macos") {
+        format!("/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{current}")
+    } else {
+        current
+    }
+}
+
 pub fn inspect_media_file(path: &str) -> Result<MediaProbeResult, String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
@@ -350,6 +359,7 @@ pub fn inspect_media_file(path: &str) -> Result<MediaProbeResult, String> {
     let ffprobe = resolve_ffprobe_binary();
 
     let output = Command::new(ffprobe)
+        .env("PATH", extended_path_env())
         .args([
             "-v",
             "quiet",
@@ -357,6 +367,7 @@ pub fn inspect_media_file(path: &str) -> Result<MediaProbeResult, String> {
             "json",
             "-show_format",
             "-show_streams",
+            "--",
             trimmed,
         ])
         .output()

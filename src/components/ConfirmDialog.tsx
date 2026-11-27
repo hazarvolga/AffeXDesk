@@ -29,6 +29,11 @@ export function ConfirmDialog({
   const titleId = useId();
   const descId = useId();
   const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const onCancelRef = useRef(onCancel);
+
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
 
   useEffect(() => {
     if (!open) return;
@@ -38,13 +43,14 @@ export function ConfirmDialog({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !busy) {
         event.preventDefault();
-        onCancel();
+        event.stopPropagation();
+        onCancelRef.current();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, busy, onCancel]);
+  }, [open, busy]);
 
   if (!open) return null;
 
@@ -90,8 +96,8 @@ export function ConfirmDialog({
 
         {details && details.length > 0 && (
           <ul className="dialog-details">
-            {details.map((item) => (
-              <li key={item} className="mono">
+            {details.map((item, idx) => (
+              <li key={`${idx}-${item}`} className="mono">
                 {item}
               </li>
             ))}

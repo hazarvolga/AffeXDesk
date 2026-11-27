@@ -105,8 +105,18 @@ pub fn parse_docker_ps_json_lines(stdout: &str) -> Vec<DockerContainer> {
     containers
 }
 
+fn extended_path_env() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    if cfg!(target_os = "macos") {
+        format!("/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{current}")
+    } else {
+        current
+    }
+}
+
 pub fn inspect_docker() -> DockerOverview {
     let ps_output = match Command::new("docker")
+        .env("PATH", extended_path_env())
         .args(["ps", "-a", "--format", "{{json .}}"])
         .output()
     {
@@ -139,6 +149,7 @@ pub fn inspect_docker() -> DockerOverview {
     let containers = parse_docker_ps_json_lines(&stdout);
 
     let reclaimable_summary = match Command::new("docker")
+        .env("PATH", extended_path_env())
         .args(["system", "df", "--format", "{{.Type}}: {{.Reclaimable}}"])
         .output()
     {
@@ -183,6 +194,7 @@ pub fn docker_container_action(id: &str, action: &str) -> Result<String, String>
     }
 
     let output = Command::new("docker")
+        .env("PATH", extended_path_env())
         .args([normalized_action.as_str(), safe_id.as_str()])
         .output()
         .map_err(|err| format!("Docker komutu çalıştırılamadı: {err}"))?;
@@ -197,6 +209,7 @@ pub fn docker_container_action(id: &str, action: &str) -> Result<String, String>
 
 pub fn docker_prune_unused() -> Result<String, String> {
     let output = Command::new("docker")
+        .env("PATH", extended_path_env())
         .args(["system", "prune", "-f"])
         .output()
         .map_err(|err| format!("Docker prune çalıştırılamadı: {err}"))?;
@@ -230,10 +243,9 @@ fn extract_env_key_names(content: &str) -> Vec<String> {
                 && key
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
+                && !keys.iter().any(|k| k == key)
             {
-                if !keys.iter().any(|k| k == key) {
-                    keys.push(key.to_string());
-                }
+                keys.push(key.to_string());
             }
         }
     }

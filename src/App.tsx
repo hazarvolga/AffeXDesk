@@ -34,7 +34,11 @@ import {
 } from "./components/OverviewView";
 import { ProcessesView } from "./components/ProcessesView";
 import { ProjectsView } from "./components/ProjectsView";
-import { DiskAnalyzerView } from "./components/DiskAnalyzerView";
+import {
+  clearDiskAnalyzerCache,
+  DiskAnalyzerView,
+} from "./components/DiskAnalyzerView";
+import { clearSmartCleanerUiCache } from "./components/SmartCleanerPanel";
 import { GitView } from "./components/GitView";
 import { KnowledgeView } from "./components/KnowledgeView";
 import { StudioDevOpsView } from "./components/StudioDevOpsView";
@@ -187,9 +191,13 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [settings.refresh_interval_secs, refreshTelemetry]);
 
-  // Meta/Alt + 1..6 ve Meta/Ctrl + K klavye kısayolları
+  // Meta/Alt + 1..8 ve Meta/Ctrl + K klavye kısayolları
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+        return;
+      }
+
       if (
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
@@ -297,12 +305,17 @@ export default function App() {
             )} geri kazanıldı.`
           );
         }
-        await refreshWorkspacesAndProjects();
+        clearDiskAnalyzerCache();
+        clearSmartCleanerUiCache();
+        await Promise.all([
+          refreshWorkspacesAndProjects(),
+          refreshTelemetry(),
+        ]);
       } catch (err) {
         showToast("error", `Temizlik başarısız: ${String(err)}`);
       }
     },
-    [refreshWorkspacesAndProjects, showToast]
+    [refreshWorkspacesAndProjects, refreshTelemetry, showToast]
   );
 
   const handleSaveProjectUrl = useCallback(
@@ -534,7 +547,7 @@ export default function App() {
                   className={`telemetry-ribbon__fill ${
                     metrics.mem_pressure === "critical"
                       ? "progress-fill--danger"
-                      : metrics.mem_pressure === "elevated"
+                      : metrics.mem_pressure === "warn"
                       ? "progress-fill--warning"
                       : "progress-fill--indigo"
                   }`}
@@ -583,9 +596,12 @@ export default function App() {
               <Flame
                 size={13}
                 className={
-                  metrics.thermal_state === "critical" ||
-                  metrics.thermal_state === "hot"
+                  metrics.thermal_state === "critical"
+                    ? "text-danger"
+                    : metrics.thermal_state === "serious"
                     ? "text-warning"
+                    : metrics.thermal_state === "fair"
+                    ? "text-cyan"
                     : "muted"
                 }
               />
@@ -599,17 +615,18 @@ export default function App() {
                 className={`badge ${
                   metrics.thermal_state === "critical"
                     ? "badge--danger"
-                    : metrics.thermal_state === "hot" ||
-                      metrics.thermal_state === "warm"
+                    : metrics.thermal_state === "serious"
                     ? "badge--warning"
+                    : metrics.thermal_state === "fair"
+                    ? "badge--info"
                     : "badge--success"
                 }`}
               >
                 {metrics.thermal_state === "critical"
                   ? "Kritik"
-                  : metrics.thermal_state === "hot"
-                  ? "Sıcak"
-                  : metrics.thermal_state === "warm"
+                  : metrics.thermal_state === "serious"
+                  ? "Yüksek"
+                  : metrics.thermal_state === "fair"
                   ? "Ilık"
                   : "Nominal"}
               </span>

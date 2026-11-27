@@ -712,8 +712,8 @@ pub fn open_or_close_floating_hud(app: &tauri::AppHandle, enabled: bool) -> Resu
         return Ok(true);
     }
 
-    let hud_width = 820.0_f64;
-    let hud_height = 38.0_f64;
+    let hud_width = 980.0_f64;
+    let hud_height = 40.0_f64;
 
     let mut builder = WebviewWindowBuilder::new(
         app,

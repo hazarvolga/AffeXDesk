@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::process::Command;
 use sysinfo::{Components, Disks, System};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +268,110 @@ pub fn collect_system_metrics() -> SystemMetrics {
         hostname,
         uptime_secs,
         collected_at,
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AudioPlaybackStatus {
+    pub playing: bool,
+    pub source: Option<String>,
+    pub track: Option<String>,
+}
+
+pub fn parse_pmset_audio_playing(stdout: &str) -> bool {
+    stdout.lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.contains("coreaudiod")
+            && (lower.contains("com.apple.audio")
+                || lower.contains("preventuseridle")
+                || lower.contains("noidlesleep")
+                || lower.contains("audio"))
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn query_macos_now_playing() -> (Option<String>, Option<String>) {
+    // Only query Spotify / Music if already running (never launch them)
+    if Command::new("pgrep")
+        .args(["-x", "Spotify"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        if let Ok(out) = Command::new("osascript")
+            .args([
+                "-e",
+                r#"tell application "Spotify" to if player state is playing then (name of current track & " — " & artist of current track)"#,
+            ])
+            .output()
+        {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return (Some("Spotify".to_string()), Some(s));
+            }
+        }
+    }
+    if Command::new("pgrep")
+        .args(["-x", "Music"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        if let Ok(out) = Command::new("osascript")
+            .args([
+                "-e",
+                r#"tell application "Music" to if player state is playing then (name of current track & " — " & artist of current track)"#,
+            ])
+            .output()
+        {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !s.is_empty() {
+                return (Some("Apple Music".to_string()), Some(s));
+            }
+        }
+    }
+    (Some("Sistem Sesi".to_string()), None)
+}
+
+pub fn detect_audio_playback() -> AudioPlaybackStatus {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = Command::new("pmset").args(["-g", "assertions"]).output() {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                if parse_pmset_audio_playing(&text) {
+                    let (source, track) = query_macos_now_playing();
+                    return AudioPlaybackStatus {
+                        playing: true,
+                        source,
+                        track,
+                    };
+                }
+            }
+        }
+        AudioPlaybackStatus::default()
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(out) = Command::new("pactl").args(["list", "sink-inputs"]).output() {
+            if out.status.success() {
+                let text = String::from_utf8_lossy(&out.stdout);
+                if text.contains("State: RUNNING") {
+                    return AudioPlaybackStatus {
+                        playing: true,
+                        source: Some("PulseAudio / PipeWire".to_string()),
+                        track: None,
+                    };
+                }
+            }
+        }
+        AudioPlaybackStatus::default()
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        AudioPlaybackStatus::default()
     }
 }
 

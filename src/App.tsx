@@ -11,6 +11,7 @@ import {
   HardDrive,
   LayoutDashboard,
   MemoryStick,
+  Music,
   Pin,
   PinOff,
   Settings,
@@ -53,6 +54,7 @@ import { StudioDevOpsView } from "./components/StudioDevOpsView";
 import { SettingsView } from "./components/SettingsView";
 import { AiDrawer } from "./components/AiDrawer";
 import { BootSplash } from "./components/BootSplash";
+import { EdgeEqualizer } from "./components/EdgeEqualizer";
 
 interface ToastMessage {
   id: number;
@@ -101,6 +103,9 @@ export default function App() {
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>("all");
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
   const [floatingHudOpen, setFloatingHudOpen] = useState(false);
+  const [eqEnabled, setEqEnabled] = useState(true);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [audioTrack, setAudioTrack] = useState<string | null>(null);
 
   const [version, setVersion] = useState<string>("0.1.0");
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
@@ -568,6 +573,34 @@ export default function App() {
       .catch(() => {});
   }, []);
 
+  // Poll macOS/Linux system audio playback (zero microphone permission) for Edge Equalizer
+  useEffect(() => {
+    const mode = (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE;
+    if (mode === "test" || !eqEnabled) {
+      setAudioPlaying(false);
+      return;
+    }
+    let alive = true;
+    const check = async () => {
+      try {
+        const st = await api.getAudioPlaybackStatus();
+        if (!alive) return;
+        setAudioPlaying(Boolean(st?.playing));
+        setAudioTrack(st?.track ?? null);
+      } catch {
+        // yoksay
+      }
+    };
+    void check();
+    const timer = window.setInterval(() => {
+      void check();
+    }, 2500);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [eqEnabled]);
+
   const shellRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
@@ -670,6 +703,7 @@ export default function App() {
           onComplete={handleBootComplete}
         />
       )}
+      <EdgeEqualizer playing={audioPlaying} enabled={eqEnabled} />
       <aside className="sidebar" aria-label="Ana Gezinme">
         <div className="brand">
           <button
@@ -751,10 +785,31 @@ export default function App() {
             <span className="truncate">
               {metrics?.hostname || "Mission Control"}
             </span>
+            <button
+              type="button"
+              className={`eq-toggle-btn${eqEnabled && audioPlaying ? " eq-toggle-btn--live" : ""}`}
+              onClick={() => setEqEnabled((prev) => !prev)}
+              title={
+                eqEnabled
+                  ? audioPlaying
+                    ? `Müzik Equalizer Aktif${audioTrack ? `: ${audioTrack}` : ""} (Kapatmak için tıklayın)`
+                    : "Müzik Equalizer: Otomatik (Müzik çalarken kenarda yanar)"
+                  : "Müzik Equalizer: Kapalı (Açmak için tıklayın)"
+              }
+              aria-label="Müzik Equalizer Aç/Kapa"
+            >
+              <Music size={12} />
+            </button>
           </div>
-          <span className="muted mono truncate">
-            {metrics?.os_name || "Yerel Telemetri"}
-          </span>
+          {eqEnabled && audioPlaying && audioTrack ? (
+            <span className="text-cyan mono truncate" style={{ fontSize: 10.5 }} title={audioTrack}>
+              ♪ {audioTrack}
+            </span>
+          ) : (
+            <span className="muted mono truncate">
+              {metrics?.os_name || "Yerel Telemetri"}
+            </span>
+          )}
         </div>
       </aside>
 

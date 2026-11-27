@@ -472,6 +472,12 @@ export interface ProjectAuditReport {
   rules: DevOpsRuleResult[];
 }
 
+export interface AudioPlaybackStatus {
+  playing: boolean;
+  source: string | null;
+  track: string | null;
+}
+
 export const api = {
   appVersion(): Promise<string> {
     return invoke<string>("app_version");
@@ -766,5 +772,9 @@ export const api = {
 
   saveDevOpsRulesConfig(config: DevOpsRulesConfig): Promise<DevOpsRulesConfig> {
     return invoke<DevOpsRulesConfig>("save_devops_rules_config", { config });
+  },
+
+  getAudioPlaybackStatus(): Promise<AudioPlaybackStatus> {
+    return invoke<AudioPlaybackStatus>("get_audio_playback_status");
   },
 };

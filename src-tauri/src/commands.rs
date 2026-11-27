@@ -825,6 +825,13 @@ pub async fn audit_project_rules(
 }
 
 #[tauri::command]
+pub async fn get_audio_playback_status() -> Result<telemetry::AudioPlaybackStatus, String> {
+    tokio::task::spawn_blocking(telemetry::detect_audio_playback)
+        .await
+        .map_err(|err| format!("audio status check failed: {err}"))
+}
+
+#[tauri::command]
 pub async fn apply_project_rule_fix(
     project_path: String,
     fix_action: String,

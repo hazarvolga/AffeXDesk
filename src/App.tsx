@@ -980,6 +980,7 @@ export default function App() {
               onOpenFinder={(p) => void handleOpenFinder(p)}
               onOpenIde={(p) => void handleOpenIde(p)}
               onOpenUrl={(u) => void handleOpenUrl(u)}
+              onNotify={showToast}
             />
           )}
 

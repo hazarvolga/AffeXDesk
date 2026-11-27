@@ -422,6 +422,38 @@ export interface ClientProjectInput {
   notes: string;
 }
 
+export interface ProjectCommitItem {
+  hash: string;
+  date_rel: string;
+  message: string;
+}
+
+export interface DevOpsRuleResult {
+  id: string;
+  category: "git" | "security" | "deploy" | "docs" | "quality" | string;
+  title: string;
+  status: "pass" | "warn" | "fail" | string;
+  detail: string;
+  fix_action: string | null;
+}
+
+export interface ProjectAuditReport {
+  project_path: string;
+  project_name: string;
+  score: number;
+  grade: string;
+  passed_count: number;
+  warn_count: number;
+  fail_count: number;
+  git_remote_provider: string | null;
+  git_remote_url: string | null;
+  git_branch: string | null;
+  deploy_targets: string[];
+  recent_commits: ProjectCommitItem[];
+  dirty_files: string[];
+  rules: DevOpsRuleResult[];
+}
+
 export const api = {
   appVersion(): Promise<string> {
     return invoke<string>("app_version");
@@ -700,5 +732,13 @@ export const api = {
 
   focusMainWindow(): Promise<void> {
     return invoke<void>("focus_main_window");
+  },
+
+  auditProjectRules(projectPath: string): Promise<ProjectAuditReport> {
+    return invoke<ProjectAuditReport>("audit_project_rules", { projectPath });
+  },
+
+  applyProjectRuleFix(projectPath: string, fixAction: string): Promise<string> {
+    return invoke<string>("apply_project_rule_fix", { projectPath, fixAction });
   },
 };

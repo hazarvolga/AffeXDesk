@@ -24,6 +24,7 @@ import type {
 } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { ProjectDetailView } from "./ProjectDetailView";
 import type { ProjectFilter } from "./OverviewView";
 
 export interface ProjectsViewProps {
@@ -45,6 +46,7 @@ export interface ProjectsViewProps {
   onOpenFinder: (path: string) => void;
   onOpenIde: (path: string) => void;
   onOpenUrl: (url: string) => void;
+  onNotify?: (tone: "success" | "error" | "info", text: string) => void;
 }
 
 const PROJECT_FILTERS: Array<{ id: ProjectFilter; label: string }> = [
@@ -73,8 +75,12 @@ export function ProjectsView({
   onOpenFinder,
   onOpenIde,
   onOpenUrl,
+  onNotify,
 }: ProjectsViewProps) {
   const [search, setSearch] = useState("");
+  const [selectedProjectPath, setSelectedProjectPath] = useState<string | null>(
+    null
+  );
   const [cleanTarget, setCleanTarget] = useState<ProjectInfo | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [editingUrlPath, setEditingUrlPath] = useState<string | null>(null);
@@ -139,6 +145,68 @@ export function ProjectsView({
     } finally {
       setSavingUrl(false);
     }
+  }
+
+  const selectedProject = useMemo(
+    () =>
+      selectedProjectPath
+        ? (scanReport?.projects ?? []).find((p) => p.path === selectedProjectPath) ??
+          null
+        : null,
+    [selectedProjectPath, scanReport]
+  );
+
+  if (selectedProject) {
+    const linkedProj = clientProjects.find(
+      (cp) => cp.local_path && cp.local_path === selectedProject.path
+    );
+    const linkedClient = linkedProj
+      ? clients.find((c) => c.id === linkedProj.client_id) ?? null
+      : null;
+    const uptime = selectedProject.live_url
+      ? uptimeMap[selectedProject.live_url]
+      : undefined;
+
+    return (
+      <>
+        <ProjectDetailView
+          project={selectedProject}
+          uptime={uptime}
+          linkedClient={linkedClient}
+          onBack={() => setSelectedProjectPath(null)}
+          onOpenFinder={onOpenFinder}
+          onOpenIde={onOpenIde}
+          onOpenUrl={onOpenUrl}
+          onConnectRemote={onConnectRemote}
+          onRequestClean={(proj) => setCleanTarget(proj)}
+          onNotify={onNotify}
+        />
+        <ConfirmDialog
+          open={cleanTarget !== null}
+          title="Proje Önbelleklerini Temizle"
+          description={
+            cleanTarget
+              ? `"${cleanTarget.name}" projesindeki yalnızca güvenli (allowlist) önbellek klasörleri silinecek ve ${formatBytes(
+                  cleanTarget.reclaimable_bytes
+                )} disk alanı geri kazanılacak.`
+              : ""
+          }
+          details={cleanTarget?.reclaimable_dirs.map(
+            (d) => `${d.name} (${formatBytes(d.size_bytes)}) — ${d.path}`
+          )}
+          confirmLabel={
+            cleanTarget
+              ? `Temizle (${formatBytes(cleanTarget.reclaimable_bytes)})`
+              : "Temizle"
+          }
+          cancelLabel="Vazgeç"
+          tone="warning"
+          busy={cleaning}
+          onConfirm={handleConfirmClean}
+          onCancel={() => setCleanTarget(null)}
+        />
+      </>
+    );
   }
 
   return (
@@ -233,7 +301,14 @@ export function ProjectsView({
               <article key={proj.path} className="project-card">
                 <div className="project-card__head">
                   <div className="project-card__title-wrap">
-                    <h2 className="project-card__title">{proj.name}</h2>
+                    <button
+                      type="button"
+                      className="project-card__title-btn"
+                      onClick={() => setSelectedProjectPath(proj.path)}
+                      title="Proje detay ve DevOps denetim sayfasını aç"
+                    >
+                      <h2 className="project-card__title">{proj.name}</h2>
+                    </button>
                     <span className="badge badge--neutral">
                       {proj.workspace_label}
                     </span>
@@ -458,6 +533,14 @@ export function ProjectsView({
                   >
                     <ExternalLink size={13} />
                     <span>Site</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    style={{ marginLeft: "auto" }}
+                    onClick={() => setSelectedProjectPath(proj.path)}
+                  >
+                    <span>Detay →</span>
                   </button>
                 </div>
               </article>

@@ -93,6 +93,8 @@ pub fn run() {
             commands::set_floating_hud,
             commands::get_floating_hud_status,
             commands::focus_main_window,
+            commands::audit_project_rules,
+            commands::apply_project_rule_fix,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AffeXDesk");

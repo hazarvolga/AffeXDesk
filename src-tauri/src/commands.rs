@@ -773,3 +773,24 @@ pub fn focus_main_window(app: tauri::AppHandle) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[tauri::command]
+pub async fn audit_project_rules(
+    project_path: String,
+) -> Result<workspace::audit::ProjectAuditReport, String> {
+    tokio::task::spawn_blocking(move || workspace::audit::audit_project(&project_path))
+        .await
+        .map_err(|err| format!("project audit task failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn apply_project_rule_fix(
+    project_path: String,
+    fix_action: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        workspace::audit::apply_project_rule_fix(&project_path, &fix_action)
+    })
+    .await
+    .map_err(|err| format!("project rule fix task failed: {err}"))?
+}

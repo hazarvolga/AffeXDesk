@@ -1,3 +1,5 @@
+pub mod audit;
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;

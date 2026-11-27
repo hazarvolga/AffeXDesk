@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use sysinfo::Disks;
 
 const MAX_ENTRIES: usize = 40;
-const MAX_SCAN_THREADS: usize = 6;
+const MAX_SCAN_THREADS: usize = 10;
+const DU_TIMEOUT_SECS: u64 = 25;
 const QUICK_WINS_CACHE_TTL_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -641,18 +642,49 @@ fn measure_dir_size(path: &Path, include_protected: bool) -> u64 {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn measure_dir_size_raw(path: &Path) -> u64 {
-    use std::process::Command;
+    use std::io::Read;
+    use std::process::{Command, Stdio};
 
-    if let Ok(output) = Command::new("du").args(["-skx"]).arg(path).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Some(first_token) = stdout.split_whitespace().next() {
-            if let Ok(kb) = first_token.parse::<u64>() {
-                return kb.saturating_mul(1024);
+    let Ok(mut child) = Command::new("du")
+        .args(["-skx"])
+        .arg(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return dir_size_recursive_fs(path);
+    };
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let mut out = String::new();
+                if let Some(mut stdout) = child.stdout.take() {
+                    let _ = stdout.read_to_string(&mut out);
+                }
+                if let Some(first_token) = out.split_whitespace().next() {
+                    if let Ok(kb) = first_token.parse::<u64>() {
+                        return kb.saturating_mul(1024);
+                    }
+                }
+                return 0;
+            }
+            Ok(None) => {
+                if started.elapsed() >= Duration::from_secs(DU_TIMEOUT_SECS) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return 0;
+                }
+                std::thread::sleep(Duration::from_millis(40));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return 0;
             }
         }
     }
-
-    dir_size_recursive_fs(path)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -720,6 +752,7 @@ fn scan_quick_wins(
     disk_used_bytes: u64,
     force_refresh: bool,
     include_protected: bool,
+    known_sizes: &HashMap<PathBuf, u64>,
 ) -> Vec<DiskEntry> {
     if !force_refresh {
         if let Ok(guard) = quick_wins_cache().lock() {
@@ -787,11 +820,23 @@ fn scan_quick_wins(
         })
         .collect();
 
-    let sizes = measure_paths_parallel(&existing, include_protected);
+    let mut already_measured: Vec<((String, PathBuf, bool), u64)> = Vec::new();
+    let mut to_measure: Vec<(String, PathBuf, bool)> = Vec::new();
+    for item in existing {
+        let norm = normalize_path(&item.1);
+        if let Some(&sz) = known_sizes.get(&norm) {
+            already_measured.push((item, sz));
+        } else {
+            to_measure.push(item);
+        }
+    }
 
-    let mut items: Vec<DiskEntry> = existing
+    let fresh_sizes = measure_paths_parallel(&to_measure, include_protected);
+    let mut combined: Vec<((String, PathBuf, bool), u64)> = already_measured;
+    combined.extend(to_measure.into_iter().zip(fresh_sizes));
+
+    let mut items: Vec<DiskEntry> = combined
         .into_iter()
-        .zip(sizes)
         .filter(|(_, size)| *size > 0)
         .map(|((label, path, is_dir), size_bytes)| {
             let file_name = path
@@ -989,9 +1034,14 @@ pub fn scan_disk_breakdown(
 
     let (disk_total_bytes, disk_used_bytes, disk_available_bytes) = read_primary_disk_space();
 
+    let mut known_sizes: HashMap<PathBuf, u64> = HashMap::new();
+    for entry in &entries {
+        known_sizes.insert(normalize_path(Path::new(&entry.path)), entry.size_bytes);
+    }
+
     let quick_wins = if is_home_root {
         if let Some(ref h) = home {
-            scan_quick_wins(h, disk_used_bytes, true, include_protected)
+            scan_quick_wins(h, disk_used_bytes, true, include_protected, &known_sizes)
         } else {
             Vec::new()
         }

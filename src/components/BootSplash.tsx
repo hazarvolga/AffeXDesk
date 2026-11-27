@@ -5,118 +5,117 @@ import { TerminalSquare } from "lucide-react";
 
 export interface BootSplashProps {
   version: string;
+  hostname?: string | null;
+  osName?: string | null;
+  cpuCores?: number | null;
   onComplete: () => void;
 }
 
 const TARGET_TITLE = "AFFEXDESK";
-const SCRAMBLE_CHARS = "0123456789ABCDEF#$%+=*";
-const BOOT_PHASES = [
-  "KERNEL TELEMETRY · LOCKING",
-  "WORKSPACES & GIT GRAPH · SYNCED",
-  "DOCKER & DISK ENGINE · ONLINE",
-  "MISSION CONTROL · ARMED",
+const SCRAMBLE_CHARS = "0123456789ABCDEF/\\-_#";
+
+const SUBSYSTEMS = [
+  { code: "SYS.01", label: "KERNEL TELEMETRY BUS" },
+  { code: "SYS.02", label: "WORKSPACE & GIT GRAPH" },
+  { code: "SYS.03", label: "DOCKER & NVME ANALYZER" },
+  { code: "SYS.04", label: "MISSION CONTROL HUD" },
 ];
 
-const CORE_VERTEX_SHADER = /* glsl */ `
+// Custom GLSL 3D Lidar Tactical Grid + Sweeping Laser Scanner Shader
+const LIDAR_VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
-  uniform float uPulse;
-  uniform float uExpand;
-  varying vec3 vNormal;
-  varying vec3 vViewPos;
-  varying float vDisplace;
+  uniform float uScanZ;
+  varying vec3 vWorldPos;
+  varying vec2 vUv;
+  varying float vElev;
 
-  float harmonicNoise(vec3 p, float t) {
-    float n = sin(p.x * 3.1 + t * 1.4) * cos(p.y * 2.9 - t * 1.1) * sin(p.z * 3.3 + t * 0.9);
-    n += 0.45 * sin(p.x * 6.4 - t * 2.1 + p.z * 4.2);
-    n += 0.22 * cos(p.y * 8.2 + t * 2.7 - p.x * 5.1);
-    return n;
+  float terrainWave(vec2 p, float t) {
+    float h = sin(p.x * 0.42 + t * 0.65) * cos(p.y * 0.36 - t * 0.45) * 0.62;
+    h += sin(p.x * 1.15 - p.y * 0.95 + t * 0.9) * 0.22;
+    float centerBowl = smoothstep(1.5, 9.5, length(p * vec2(0.85, 0.7)));
+    return h * centerBowl;
   }
 
   void main() {
-    float disp = harmonicNoise(position, uTime) * (0.14 + uPulse * 0.14);
-    vDisplace = disp;
-    vec3 displaced = position + normal * (disp + uExpand * 0.65);
-    vec4 mvPos = modelViewMatrix * vec4(displaced, 1.0);
-    vViewPos = -mvPos.xyz;
-    vNormal = normalize(normalMatrix * normal);
-    gl_Position = projectionMatrix * mvPos;
-  }
-`;
-
-const CORE_FRAGMENT_SHADER = /* glsl */ `
-  uniform float uTime;
-  uniform float uOpacity;
-  varying vec3 vNormal;
-  varying vec3 vViewPos;
-  varying float vDisplace;
-
-  void main() {
-    vec3 normal = normalize(vNormal);
-    vec3 viewDir = normalize(vViewPos);
-    float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.6);
-
-    vec3 obsidian = vec3(0.035, 0.045, 0.075);
-    vec3 cyan = vec3(0.22, 0.74, 0.97);
-    vec3 emerald = vec3(0.06, 0.73, 0.51);
-    vec3 indigo = vec3(0.50, 0.55, 0.97);
-
-    float wave = 0.5 + 0.5 * sin(vDisplace * 14.0 + uTime * 2.2);
-    vec3 energy = mix(cyan, emerald, wave);
-    energy = mix(energy, indigo, fresnel * 0.35);
-
-    float scan = 0.92 + 0.08 * sin(gl_FragCoord.y * 0.65 - uTime * 8.0);
-    vec3 col = mix(obsidian, energy, clamp(fresnel * 1.25 + max(vDisplace, 0.0) * 1.4, 0.0, 1.0));
-    col += energy * pow(fresnel, 4.5) * 0.9;
-    col *= scan;
-
-    gl_FragColor = vec4(col, uOpacity * (0.86 + fresnel * 0.14));
-  }
-`;
-
-const PARTICLE_VERTEX_SHADER = /* glsl */ `
-  uniform float uTime;
-  uniform float uWarp;
-  attribute float aScale;
-  attribute vec3 aColor;
-  varying vec3 vColor;
-  varying float vAlpha;
-
-  void main() {
-    vColor = aColor;
+    vUv = uv;
     vec3 pos = position;
-    float zRange = 28.0;
-    pos.z = mod(pos.z + uTime * (1.4 + uWarp * 4.2) + zRange * 0.5, zRange) - zRange * 0.5;
-    vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-    float dist = max(-mvPosition.z, 0.5);
-    gl_PointSize = clamp(aScale * (120.0 / dist), 1.0, 10.0);
-    vAlpha = smoothstep(14.0, 2.5, dist) * smoothstep(0.6, 2.2, dist);
-    gl_Position = projectionMatrix * mvPosition;
+    float elev = terrainWave(pos.xy, uTime);
+    pos.z += elev;
+    vElev = elev;
+    vec4 worldPos = modelMatrix * vec4(pos, 1.0);
+    vWorldPos = worldPos.xyz;
+    gl_Position = projectionMatrix * viewMatrix * worldPos;
   }
 `;
 
-const PARTICLE_FRAGMENT_SHADER = /* glsl */ `
+const LIDAR_FRAGMENT_SHADER = /* glsl */ `
+  uniform float uTime;
+  uniform float uScanZ;
   uniform float uOpacity;
-  varying vec3 vColor;
-  varying float vAlpha;
+  uniform float uLockFlash;
+  varying vec3 vWorldPos;
+  varying vec2 vUv;
+  varying float vElev;
 
   void main() {
-    vec2 uv = gl_PointCoord - vec2(0.5);
-    float d = length(uv);
-    if (d > 0.5) discard;
-    float glow = smoothstep(0.5, 0.05, d);
-    gl_FragColor = vec4(vColor, glow * vAlpha * uOpacity);
+    // Crisp dual-resolution millimeter tactical grid
+    vec2 major = abs(fract(vWorldPos.xz * 0.5 - 0.5) - 0.5) / fwidth(vWorldPos.xz * 0.5);
+    float majorLine = 1.0 - min(min(major.x, major.y), 1.0);
+
+    vec2 minor = abs(fract(vWorldPos.xz * 2.0 - 0.5) - 0.5) / fwidth(vWorldPos.xz * 2.0);
+    float minorLine = (1.0 - min(min(minor.x, minor.y), 1.0)) * 0.28;
+
+    float grid = max(majorLine, minorLine);
+
+    // Sweeping laser scanline across Z axis
+    float scanDist = abs(vWorldPos.z - uScanZ);
+    float laserCore = smoothstep(0.28, 0.0, scanDist);
+    float laserTrail = smoothstep(3.4, 0.0, scanDist) * 0.45;
+    float scanEnergy = laserCore + laserTrail;
+
+    // Radial radar pulse from center
+    float radialDist = length(vWorldPos.xz);
+    float pulseRing = smoothstep(0.35, 0.0, abs(radialDist - mod(uTime * 3.8, 16.0))) * 0.4;
+
+    // Distance fog fade
+    float distFade = smoothstep(18.0, 2.5, radialDist);
+
+    vec3 baseCyan = vec3(0.18, 0.68, 0.94);
+    vec3 hotCyan = vec3(0.55, 0.92, 1.0);
+    vec3 emerald = vec3(0.06, 0.78, 0.54);
+
+    vec3 gridCol = mix(baseCyan, emerald, smoothstep(-0.35, 0.55, vElev));
+    vec3 col = gridCol * grid * (0.28 + scanEnergy * 1.15 + pulseRing);
+    col += hotCyan * laserCore * 0.55;
+    col += emerald * uLockFlash * grid * 0.7;
+
+    float alpha = (grid * 0.42 + laserCore * 0.65 + laserTrail * 0.16 + pulseRing * 0.2) * distFade * uOpacity;
+    if (alpha < 0.008) discard;
+
+    gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.95));
   }
 `;
 
-export function BootSplash({ version, onComplete }: BootSplashProps) {
+export function BootSplash({
+  version,
+  hostname,
+  osName,
+  cpuCores,
+  onComplete,
+}: BootSplashProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const hudRef = useRef<HTMLDivElement | null>(null);
+  const reticleRef = useRef<SVGSVGElement | null>(null);
+  const shutterTopRef = useRef<HTMLDivElement | null>(null);
+  const shutterBotRef = useRef<HTMLDivElement | null>(null);
   const barFillRef = useRef<HTMLSpanElement | null>(null);
 
-  const [displayTitle, setDisplayTitle] = useState("0xAF9E4D1");
+  const [displayTitle, setDisplayTitle] = useState("0xAF/E9-X");
   const [percent, setPercent] = useState(0);
-  const [phaseIdx, setPhaseIdx] = useState(0);
+  const [lockedCount, setLockedCount] = useState(0);
+  const [scanState, setScanState] = useState<"SCANNING" | "CALIBRATING" | "LOCKED">("SCANNING");
+  const [telemetryCoords, setTelemetryCoords] = useState("AZ 000.0° · EL +18.4°");
 
   const finishedRef = useRef(false);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
@@ -128,9 +127,8 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
     if (rootRef.current) {
       gsap.to(rootRef.current, {
         opacity: 0,
-        scale: 1.03,
-        duration: 0.34,
-        ease: "power3.inOut",
+        duration: 0.3,
+        ease: "power2.inOut",
         onComplete,
       });
     } else {
@@ -155,21 +153,16 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
 
     const state = {
       progress: 0,
-      warp: 0,
-      pulse: 0.25,
-      expand: 0,
+      scanZ: -12,
       opacity: 1,
+      lockFlash: 0,
       mouseX: 0,
       mouseY: 0,
     };
 
     let camera: THREE.PerspectiveCamera | null = null;
-    let coreGroup: THREE.Group | null = null;
-    let coreMesh: THREE.Mesh | null = null;
-    let cageMesh: THREE.Mesh | null = null;
-    const rings: THREE.Mesh[] = [];
-    let coreMat: THREE.ShaderMaterial | null = null;
-    let particleMat: THREE.ShaderMaterial | null = null;
+    let lidarMat: THREE.ShaderMaterial | null = null;
+    let barMeshes: THREE.Mesh[] = [];
 
     const handleMouseMove = (e: MouseEvent) => {
       state.mouseX = (e.clientX / Math.max(window.innerWidth, 1) - 0.5) * 2;
@@ -179,15 +172,15 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
 
     let handleResize: (() => void) | null = null;
 
-    // Initialize real Three.js WebGL2 scene
     if (mount) {
       try {
         const width = window.innerWidth || 1280;
         const height = window.innerHeight || 800;
 
         const scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 100);
-        camera.position.set(0, 0.25, 11.5);
+        camera = new THREE.PerspectiveCamera(46, width / height, 0.1, 100);
+        camera.position.set(0, 6.2, 11.8);
+        camera.lookAt(0, -0.4, 0);
 
         renderer = new THREE.WebGLRenderer({
           antialias: true,
@@ -196,133 +189,85 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
         });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         renderer.setSize(width, height);
-        renderer.setClearColor(0x09090b, 1);
+        renderer.setClearColor(0x07080b, 1);
         mount.appendChild(renderer.domElement);
 
-        coreGroup = new THREE.Group();
-        coreGroup.position.set(0, 0.42, 0);
-        coreGroup.scale.setScalar(0.22);
-        scene.add(coreGroup);
-
-        // 1. Custom GLSL Fresnel + Harmonic Displacement Core
-        const coreGeo = new THREE.IcosahedronGeometry(1.12, 5);
-        geometries.push(coreGeo);
-        coreMat = new THREE.ShaderMaterial({
-          vertexShader: CORE_VERTEX_SHADER,
-          fragmentShader: CORE_FRAGMENT_SHADER,
+        // 1. 3D Lidar Topographic Grid Floor
+        const planeGeo = new THREE.PlaneGeometry(34, 34, 96, 96);
+        geometries.push(planeGeo);
+        lidarMat = new THREE.ShaderMaterial({
+          vertexShader: LIDAR_VERTEX_SHADER,
+          fragmentShader: LIDAR_FRAGMENT_SHADER,
           transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          extensions: { derivatives: true } as unknown as THREE.ShaderMaterialParameters["extensions"],
           uniforms: {
             uTime: { value: 0 },
-            uPulse: { value: state.pulse },
-            uExpand: { value: state.expand },
+            uScanZ: { value: state.scanZ },
             uOpacity: { value: 1 },
+            uLockFlash: { value: 0 },
           },
         });
-        materials.push(coreMat);
-        coreMesh = new THREE.Mesh(coreGeo, coreMat);
-        coreGroup.add(coreMesh);
+        materials.push(lidarMat);
+        const terrain = new THREE.Mesh(planeGeo, lidarMat);
+        terrain.rotation.x = -Math.PI / 2;
+        terrain.position.y = -1.75;
+        scene.add(terrain);
 
-        // 2. Precision Wireframe Geodesic Cage
-        const cageGeo = new THREE.IcosahedronGeometry(1.48, 2);
-        geometries.push(cageGeo);
-        const cageMat = new THREE.MeshBasicMaterial({
+        // 2. Vertical 3D Tactical Telemetry Columns along left & right flanks
+        const colGeo = new THREE.BoxGeometry(0.11, 1, 0.11);
+        geometries.push(colGeo);
+        const colMatCyan = new THREE.MeshBasicMaterial({
           color: 0x38bdf8,
-          wireframe: true,
           transparent: true,
-          opacity: 0.24,
+          opacity: 0.42,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
         });
-        materials.push(cageMat);
-        cageMesh = new THREE.Mesh(cageGeo, cageMat);
-        coreGroup.add(cageMesh);
-
-        // 3. Three Gyroscopic Orbital Telemetry Rings
-        const ringSpecs = [
-          { radius: 2.05, tube: 0.009, color: 0x38bdf8, opacity: 0.55, rot: [1.18, 0.35, 0] },
-          { radius: 2.48, tube: 0.007, color: 0x10b981, opacity: 0.48, rot: [-0.72, 1.15, 0.45] },
-          { radius: 2.92, tube: 0.006, color: 0x818cf8, opacity: 0.36, rot: [0.35, -0.85, 1.05] },
-        ] as const;
-
-        for (const spec of ringSpecs) {
-          const rGeo = new THREE.TorusGeometry(spec.radius, spec.tube, 12, 120);
-          geometries.push(rGeo);
-          const rMat = new THREE.MeshBasicMaterial({
-            color: spec.color,
-            transparent: true,
-            opacity: spec.opacity,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-          });
-          materials.push(rMat);
-          const ring = new THREE.Mesh(rGeo, rMat);
-          ring.rotation.set(spec.rot[0], spec.rot[1], spec.rot[2]);
-          ring.scale.setScalar(0.01);
-
-          // Tiny glowing satellite node on each orbital ring
-          const nodeGeo = new THREE.SphereGeometry(0.042, 10, 10);
-          geometries.push(nodeGeo);
-          const nodeMat = new THREE.MeshBasicMaterial({
-            color: 0xe0f2fe,
-            blending: THREE.AdditiveBlending,
-          });
-          materials.push(nodeMat);
-          const node = new THREE.Mesh(nodeGeo, nodeMat);
-          node.position.set(spec.radius, 0, 0);
-          ring.add(node);
-
-          coreGroup.add(ring);
-          rings.push(ring);
-        }
-
-        // 4. 2,200-Particle 3D Depth Warp Field
-        const count = 2200;
-        const positions = new Float32Array(count * 3);
-        const colors = new Float32Array(count * 3);
-        const scales = new Float32Array(count);
-
-        const cCyan = new THREE.Color(0x38bdf8);
-        const cEmerald = new THREE.Color(0x10b981);
-        const cIndigo = new THREE.Color(0x818cf8);
-        const cIce = new THREE.Color(0xe0f2fe);
-
-        for (let i = 0; i < count; i += 1) {
-          const angle = Math.random() * Math.PI * 2;
-          const radius = 1.6 + Math.pow(Math.random(), 0.65) * 11.5;
-          positions[i * 3] = Math.cos(angle) * radius;
-          positions[i * 3 + 1] = Math.sin(angle) * radius * 0.72;
-          positions[i * 3 + 2] = (Math.random() - 0.5) * 28;
-
-          const pick = Math.random();
-          const c =
-            pick < 0.45 ? cCyan : pick < 0.72 ? cEmerald : pick < 0.88 ? cIndigo : cIce;
-          colors[i * 3] = c.r;
-          colors[i * 3 + 1] = c.g;
-          colors[i * 3 + 2] = c.b;
-          scales[i] = 0.6 + Math.random() * 1.9;
-        }
-
-        const pGeo = new THREE.BufferGeometry();
-        pGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-        pGeo.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
-        pGeo.setAttribute("aScale", new THREE.BufferAttribute(scales, 1));
-        geometries.push(pGeo);
-
-        particleMat = new THREE.ShaderMaterial({
-          vertexShader: PARTICLE_VERTEX_SHADER,
-          fragmentShader: PARTICLE_FRAGMENT_SHADER,
+        const colMatEmerald = new THREE.MeshBasicMaterial({
+          color: 0x10b981,
           transparent: true,
-          depthWrite: false,
+          opacity: 0.45,
           blending: THREE.AdditiveBlending,
-          uniforms: {
-            uTime: { value: 0 },
-            uWarp: { value: 0 },
-            uOpacity: { value: 0.85 },
-          },
+          depthWrite: false,
         });
-        materials.push(particleMat);
-        const particles = new THREE.Points(pGeo, particleMat);
-        scene.add(particles);
+        materials.push(colMatCyan, colMatEmerald);
+
+        barMeshes = [];
+        for (let side = -1; side <= 1; side += 2) {
+          for (let i = 0; i < 14; i += 1) {
+            const z = -9.5 + i * 1.35;
+            const x = side * (5.2 + (i % 3) * 0.75);
+            const mat = i % 3 === 0 ? colMatEmerald : colMatCyan;
+            const mesh = new THREE.Mesh(colGeo, mat);
+            mesh.position.set(x, -1.75, z);
+            mesh.scale.y = 0.05;
+            mesh.userData = {
+              baseHeight: 0.35 + ((i * 37) % 10) * 0.16,
+              phase: i * 0.6 + (side > 0 ? 1.5 : 0),
+            };
+            scene.add(mesh);
+            barMeshes.push(mesh);
+          }
+        }
+
+        // 3. Subtle floating horizon laser bar
+        const laserBarGeo = new THREE.PlaneGeometry(24, 0.04);
+        geometries.push(laserBarGeo);
+        const laserBarMat = new THREE.MeshBasicMaterial({
+          color: 0x38bdf8,
+          transparent: true,
+          opacity: 0.65,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        });
+        materials.push(laserBarMat);
+        const laserBar = new THREE.Mesh(laserBarGeo, laserBarMat);
+        laserBar.rotation.x = -Math.PI / 2;
+        laserBar.position.y = -1.68;
+        scene.add(laserBar);
 
         handleResize = () => {
           if (!camera || !renderer) return;
@@ -339,33 +284,34 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
           if (disposed || !renderer || !camera) return;
           const t = clock.getElapsedTime();
 
-          if (coreMat) {
-            coreMat.uniforms.uTime.value = t;
-            coreMat.uniforms.uPulse.value = state.pulse;
-            coreMat.uniforms.uExpand.value = state.expand;
-            coreMat.uniforms.uOpacity.value = state.opacity;
+          if (lidarMat) {
+            lidarMat.uniforms.uTime.value = t;
+            lidarMat.uniforms.uScanZ.value = state.scanZ;
+            lidarMat.uniforms.uOpacity.value = state.opacity;
+            lidarMat.uniforms.uLockFlash.value = state.lockFlash;
           }
-          if (particleMat) {
-            particleMat.uniforms.uTime.value = t;
-            particleMat.uniforms.uWarp.value = state.warp;
-            particleMat.uniforms.uOpacity.value = state.opacity * 0.9;
-          }
-          if (coreMesh) {
-            coreMesh.rotation.y = t * 0.55;
-            coreMesh.rotation.x = t * 0.28;
-          }
-          if (cageMesh) {
-            cageMesh.rotation.y = -t * 0.42;
-            cageMesh.rotation.z = t * 0.22;
-          }
-          if (rings[0]) rings[0].rotation.z = t * 0.85;
-          if (rings[1]) rings[1].rotation.x = -0.72 + t * 0.65;
-          if (rings[2]) rings[2].rotation.y = -0.85 - t * 0.52;
 
-          // Subtle cursor parallax
-          camera.position.x += (state.mouseX * 0.35 - camera.position.x) * 0.05;
-          camera.position.y += (-state.mouseY * 0.22 + 0.22 - camera.position.y) * 0.05;
-          camera.lookAt(0, 0.2, 0);
+          laserBar.position.z = state.scanZ;
+          laserBarMat.opacity = 0.55 * state.opacity;
+
+          for (const bar of barMeshes) {
+            const { baseHeight, phase } = bar.userData as {
+              baseHeight: number;
+              phase: number;
+            };
+            const distToScan = Math.abs(bar.position.z - state.scanZ);
+            const boost = distToScan < 1.8 ? (1.8 - distToScan) * 0.95 : 0;
+            const h = Math.max(
+              0.08,
+              (baseHeight + Math.sin(t * 2.4 + phase) * 0.25 + boost) *
+                Math.min(1, state.progress * 1.6 + 0.15)
+            );
+            bar.scale.y = h;
+            bar.position.y = -1.75 + h * 0.5;
+          }
+
+          camera.position.x += (state.mouseX * 0.45 - camera.position.x) * 0.04;
+          camera.lookAt(0, -0.35, -0.5);
 
           renderer.render(scene, camera);
           rafId = window.requestAnimationFrame(animate);
@@ -376,7 +322,7 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
       }
     }
 
-    // GSAP Master Cinematic Timeline (~3.0s)
+    // GSAP Master Spaceship Scanner Timeline (~3.05s)
     const tl = gsap.timeline({
       onComplete: () => {
         if (!finishedRef.current) {
@@ -387,115 +333,124 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
     });
     timelineRef.current = tl;
 
-    // 1. Camera glide-in & 3D core unfold
+    // 1. Tactical camera descent over Lidar plane
     if (camera) {
       tl.to(
         camera.position,
-        { z: 5.1, duration: 1.55, ease: "expo.out" },
+        { y: 3.1, z: 7.4, duration: 1.7, ease: "expo.out" },
         0
       );
     }
-    if (coreGroup) {
-      tl.to(
-        coreGroup.scale,
-        { x: 1, y: 1, z: 1, duration: 1.35, ease: "expo.out" },
-        0.05
-      );
-    }
-    if (rings.length > 0) {
-      tl.to(
-        rings.map((r) => r.scale),
-        { x: 1, y: 1, z: 1, duration: 1.1, stagger: 0.14, ease: "power4.out" },
-        0.22
+
+    // 2. Continuous laser sweep front-to-back & back-to-front
+    tl.fromTo(
+      state,
+      { scanZ: -11 },
+      { scanZ: 8, duration: 1.35, ease: "power1.inOut" },
+      0.05
+    ).to(state, { scanZ: -4, duration: 1.15, ease: "power2.inOut" }, 1.4);
+
+    // 3. Center tactical reticle lock-on
+    if (reticleRef.current) {
+      tl.fromTo(
+        reticleRef.current,
+        { scale: 1.28, opacity: 0, rotate: -14 },
+        { scale: 1, opacity: 1, rotate: 0, duration: 1.05, ease: "expo.out" },
+        0.1
       );
     }
 
-    // 2. HUD reveal
+    // 4. Center HUD card reveal
     if (hudRef.current) {
       tl.fromTo(
         hudRef.current,
-        { opacity: 0, y: 22, scale: 0.96 },
-        { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: "power3.out" },
-        0.25
+        { opacity: 0, y: 14 },
+        { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" },
+        0.2
       );
     }
 
-    // 3. Scramble character decode + live percentage counter (0 -> 100%)
+    // 5. Scramble decode + live percentage + subsystem checklist lock
     tl.to(
       state,
       {
         progress: 1,
-        duration: 2.05,
+        duration: 2.15,
         ease: "power2.inOut",
         onUpdate: () => {
           const p = state.progress;
           setPercent(Math.round(p * 100));
-          const nextPhase = Math.min(
-            BOOT_PHASES.length - 1,
-            Math.floor(p * BOOT_PHASES.length)
-          );
-          setPhaseIdx(nextPhase);
+          setLockedCount(Math.min(SUBSYSTEMS.length, Math.floor(p * (SUBSYSTEMS.length + 0.35))));
+          if (p > 0.92) setScanState("LOCKED");
+          else if (p > 0.45) setScanState("CALIBRATING");
+
+          const az = (p * 360).toFixed(1).padStart(5, "0");
+          const el = (18.4 + Math.sin(p * Math.PI * 2) * 4.2).toFixed(1);
+          setTelemetryCoords(`AZ ${az}° · EL +${el}°`);
 
           if (barFillRef.current) {
             barFillRef.current.style.transform = `scaleX(${p})`;
           }
 
-          const lockedCount = Math.floor(p * (TARGET_TITLE.length + 1));
+          const resolved = Math.floor(p * (TARGET_TITLE.length + 1));
           let out = "";
           for (let i = 0; i < TARGET_TITLE.length; i += 1) {
-            if (i < lockedCount) {
+            if (i < resolved) {
               out += TARGET_TITLE[i];
             } else {
-              const idx = Math.floor(
-                (p * 47 + i * 7) % SCRAMBLE_CHARS.length
-              );
+              const idx = Math.floor((p * 53 + i * 7) % SCRAMBLE_CHARS.length);
               out += SCRAMBLE_CHARS[idx];
             }
           }
           setDisplayTitle(out);
         },
       },
-      0.22
+      0.18
     );
 
-    // 4. Energy pulse peak right before warp-dive
-    tl.to(state, { pulse: 0.95, duration: 0.32, ease: "power2.in" }, 2.1);
+    // 6. Target Lock emerald flash + Tactical Shutter Split Reveal
+    tl.to(state, { lockFlash: 1, duration: 0.16, ease: "power2.out" }, 2.35)
+      .to(state, { lockFlash: 0, duration: 0.24 }, 2.51);
 
-    // 5. Warp-Dive Finale: camera rockets into the core as FOV opens & splash dissolves
     if (camera) {
       tl.to(
         camera.position,
-        { z: 0.45, duration: 0.68, ease: "power3.in" },
-        2.32
-      );
-      tl.to(
-        camera,
-        {
-          fov: 96,
-          duration: 0.68,
-          ease: "power3.in",
-          onUpdate: () => camera?.updateProjectionMatrix(),
-        },
-        2.32
+        { y: 1.2, z: 3.4, duration: 0.56, ease: "power3.in" },
+        2.45
       );
     }
-    tl.to(
-      state,
-      { warp: 5.5, expand: 1.45, opacity: 0, duration: 0.68, ease: "power3.in" },
-      2.32
-    );
     if (hudRef.current) {
       tl.to(
         hudRef.current,
-        { opacity: 0, y: -14, scale: 1.04, duration: 0.42, ease: "power2.in" },
-        2.36
+        { opacity: 0, scale: 0.97, duration: 0.32, ease: "power2.in" },
+        2.48
       );
     }
+    if (reticleRef.current) {
+      tl.to(
+        reticleRef.current,
+        { opacity: 0, scale: 1.18, duration: 0.38, ease: "power2.in" },
+        2.48
+      );
+    }
+    if (shutterTopRef.current && shutterBotRef.current) {
+      tl.to(
+        shutterTopRef.current,
+        { yPercent: -100, duration: 0.44, ease: "expo.inOut" },
+        2.56
+      );
+      tl.to(
+        shutterBotRef.current,
+        { yPercent: 100, duration: 0.44, ease: "expo.inOut" },
+        2.56
+      );
+    }
+    tl.to(state, { opacity: 0, duration: 0.42, ease: "power2.in" }, 2.55);
     if (rootRef.current) {
       tl.to(
         rootRef.current,
-        { opacity: 0, duration: 0.42, ease: "power2.inOut" },
-        2.62
+        { opacity: 0, duration: 0.34, ease: "power2.inOut" },
+        2.7
       );
     }
 
@@ -518,6 +473,10 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const nodeLabel = (hostname || "LOCAL-BRIDGE").toUpperCase();
+  const osLabel = (osName || "MACOS WORKSTATION").toUpperCase();
+  const coresLabel = cpuCores ? `${cpuCores}-CORE SILICON` : "MULTI-CORE BUS";
+
   return (
     <div
       ref={rootRef}
@@ -527,22 +486,109 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
       title="Geçmek için tıklayın"
     >
       <div ref={mountRef} className="boot-splash__webgl" aria-hidden="true" />
+      <div className="boot-splash__scanlines" aria-hidden="true" />
       <div className="boot-splash__vignette" aria-hidden="true" />
 
-      {/* Corner HUD Brackets */}
-      <span className="boot-hud-corner boot-hud-corner--tl" aria-hidden="true" />
-      <span className="boot-hud-corner boot-hud-corner--tr" aria-hidden="true" />
-      <span className="boot-hud-corner boot-hud-corner--bl" aria-hidden="true" />
-      <span className="boot-hud-corner boot-hud-corner--br" aria-hidden="true" />
-
-      <div ref={hudRef} className="boot-splash__core">
-        <div className="boot-splash__mark">
-          <TerminalSquare size={20} />
+      {/* Top & Bottom Tactical Shutter Bars */}
+      <div ref={shutterTopRef} className="boot-shutter boot-shutter--top" aria-hidden="true">
+        <div className="boot-shutter__row mono">
+          <span>NODE // {nodeLabel}</span>
+          <span>{telemetryCoords}</span>
+          <span>BUS // {coresLabel}</span>
         </div>
+      </div>
+      <div ref={shutterBotRef} className="boot-shutter boot-shutter--bottom" aria-hidden="true">
+        <div className="boot-shutter__row mono">
+          <span>OS // {osLabel}</span>
+          <span>LIDAR GRID · WEBGL2</span>
+          <span>ESC / CLICK TO BYPASS</span>
+        </div>
+      </div>
+
+      {/* Precision Spaceship Tactical Scanner Reticle SVG */}
+      <svg
+        ref={reticleRef}
+        className="boot-reticle"
+        viewBox="0 0 520 520"
+        fill="none"
+        aria-hidden="true"
+      >
+        {/* Outer degree brackets */}
+        <path d="M90 140 L90 90 L140 90" stroke="rgba(56,189,248,0.55)" strokeWidth="1.5" />
+        <path d="M380 90 L430 90 L430 140" stroke="rgba(56,189,248,0.55)" strokeWidth="1.5" />
+        <path d="M90 380 L90 430 L140 430" stroke="rgba(56,189,248,0.55)" strokeWidth="1.5" />
+        <path d="M380 430 L430 430 L430 380" stroke="rgba(56,189,248,0.55)" strokeWidth="1.5" />
+
+        {/* Precision ruler ticks */}
+        <line x1="260" y1="62" x2="260" y2="86" stroke="rgba(56,189,248,0.7)" strokeWidth="1" />
+        <line x1="260" y1="434" x2="260" y2="458" stroke="rgba(56,189,248,0.7)" strokeWidth="1" />
+        <line x1="62" y1="260" x2="86" y2="260" stroke="rgba(56,189,248,0.7)" strokeWidth="1" />
+        <line x1="434" y1="260" x2="458" y2="260" stroke="rgba(56,189,248,0.7)" strokeWidth="1" />
+
+        {/* Segmented technical compass arc (static, precision HUD) */}
+        <circle
+          cx="260"
+          cy="260"
+          r="194"
+          stroke="rgba(56,189,248,0.16)"
+          strokeWidth="1"
+          strokeDasharray="6 10"
+        />
+        <circle
+          cx="260"
+          cy="260"
+          r="156"
+          stroke={scanState === "LOCKED" ? "rgba(16,185,129,0.55)" : "rgba(56,189,248,0.22)"}
+          strokeWidth="1"
+          strokeDasharray="40 20 8 20"
+        />
+
+        {/* Degree markers */}
+        <text x="260" y="52" textAnchor="middle" fill="rgba(56,189,248,0.65)" fontSize="9" fontFamily="monospace">000°</text>
+        <text x="476" y="263" textAnchor="start" fill="rgba(56,189,248,0.65)" fontSize="9" fontFamily="monospace">090°</text>
+        <text x="260" y="476" textAnchor="middle" fill="rgba(56,189,248,0.65)" fontSize="9" fontFamily="monospace">180°</text>
+        <text x="44" y="263" textAnchor="end" fill="rgba(56,189,248,0.65)" fontSize="9" fontFamily="monospace">270°</text>
+      </svg>
+
+      {/* Center Tactical Command Core */}
+      <div ref={hudRef} className="boot-hud-panel">
+        <div className="boot-hud-panel__top mono">
+          <span className="boot-hud-chip">
+            <TerminalSquare size={12} />
+            <span>BRIDGE // v{version}</span>
+          </span>
+          <span
+            className={`boot-hud-lock ${
+              scanState === "LOCKED" ? "boot-hud-lock--ok" : ""
+            }`}
+          >
+            <span className="status-dot status-dot--live" />
+            <span>{scanState}</span>
+          </span>
+        </div>
+
         <div className="boot-splash__title-row">
           <span className="boot-splash__wordmark mono">{displayTitle}</span>
-          <span className="boot-splash__version mono">v{version}</span>
         </div>
+
+        <div className="boot-checklist mono">
+          {SUBSYSTEMS.map((sub, idx) => {
+            const ok = idx < lockedCount;
+            return (
+              <div
+                key={sub.code}
+                className={`boot-checklist__row ${ok ? "boot-checklist__row--ok" : ""}`}
+              >
+                <span className="boot-checklist__code">{sub.code}</span>
+                <span className="boot-checklist__label">{sub.label}</span>
+                <span className="boot-checklist__state">
+                  {ok ? "[OK]" : "[..]"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
         <div className="boot-splash__bar-wrap">
           <div className="boot-splash__bar">
             <span ref={barFillRef} className="boot-splash__bar-fill" />
@@ -551,14 +597,7 @@ export function BootSplash({ version, onComplete }: BootSplashProps) {
             {String(percent).padStart(3, "0")}%
           </span>
         </div>
-        <div className="boot-splash__status mono">
-          <span className="status-dot status-dot--live" />
-          <span>{BOOT_PHASES[phaseIdx]}</span>
-        </div>
       </div>
-
-      <span className="boot-splash__meta mono">WEBGL2 · GSAP ENGINE</span>
-      <span className="boot-splash__skip mono">ESC / CLICK TO SKIP</span>
     </div>
   );
 }

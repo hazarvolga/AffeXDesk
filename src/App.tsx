@@ -632,7 +632,13 @@ export default function App() {
       }`}
     >
       {bootStage === "splash" && (
-        <BootSplash version={version} onComplete={handleBootComplete} />
+        <BootSplash
+          version={version}
+          hostname={metrics?.hostname}
+          osName={metrics?.os_name}
+          cpuCores={metrics?.cpu_cores}
+          onComplete={handleBootComplete}
+        />
       )}
       <aside className="sidebar" aria-label="Ana Gezinme">
         <div className="brand">

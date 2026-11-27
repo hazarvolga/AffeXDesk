@@ -2765,7 +2765,7 @@ button.telemetry-ribbon__item:hover {
 
 
 /* ==========================================================================
-   Three.js WebGL2 Boot Splash & GSAP Motion System
+   Spaceship Tactical Scanner HUD (Three.js Lidar + GSAP)
    ========================================================================== */
 .brand__mark--interactive {
   cursor: pointer;
@@ -2787,7 +2787,7 @@ button.telemetry-ribbon__item:hover {
   position: fixed;
   inset: 0;
   z-index: 300;
-  background: #09090b;
+  background: #07080b;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2807,110 +2807,173 @@ button.telemetry-ribbon__item:hover {
   height: 100%;
 }
 
+.boot-splash__scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.015) 0px,
+    rgba(255, 255, 255, 0.015) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
 .boot-splash__vignette {
   position: absolute;
   inset: 0;
   pointer-events: none;
   background: radial-gradient(
-    circle at 50% 46%,
-    rgba(9, 9, 11, 0) 28%,
-    rgba(9, 9, 11, 0.72) 100%
+    circle at 50% 50%,
+    rgba(7, 8, 11, 0) 26%,
+    rgba(7, 8, 11, 0.78) 100%
   );
 }
 
-.boot-hud-corner {
+.boot-shutter {
   position: absolute;
-  width: 18px;
-  height: 18px;
-  border-color: rgba(56, 189, 248, 0.35);
-  border-style: solid;
-  border-width: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  height: 36px;
+  background: rgba(9, 10, 14, 0.92);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
   pointer-events: none;
 }
 
-.boot-hud-corner--tl {
-  top: 22px;
-  left: 22px;
-  border-top-width: 1px;
-  border-left-width: 1px;
+.boot-shutter--top {
+  top: 0;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.24);
 }
 
-.boot-hud-corner--tr {
-  top: 22px;
-  right: 22px;
-  border-top-width: 1px;
-  border-right-width: 1px;
+.boot-shutter--bottom {
+  bottom: 0;
+  border-top: 1px solid rgba(56, 189, 248, 0.24);
 }
 
-.boot-hud-corner--bl {
-  bottom: 22px;
-  left: 22px;
-  border-bottom-width: 1px;
-  border-left-width: 1px;
+.boot-shutter__row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: rgba(148, 163, 184, 0.78);
 }
 
-.boot-hud-corner--br {
-  bottom: 22px;
-  right: 22px;
-  border-bottom-width: 1px;
-  border-right-width: 1px;
-}
-
-.boot-splash__core {
-  position: relative;
+.boot-reticle {
+  position: absolute;
+  width: min(500px, 78vmin);
+  height: min(500px, 78vmin);
   z-index: 2;
+  pointer-events: none;
+}
+
+.boot-hud-panel {
+  position: relative;
+  z-index: 4;
+  width: 340px;
+  padding: 18px 20px;
+  background: rgba(9, 10, 14, 0.76);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 2px;
+  backdrop-filter: blur(10px);
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 18px 28px;
-  margin-top: 270px;
-  background: rgba(9, 9, 11, 0.56);
-  border: 1px solid rgba(56, 189, 248, 0.18);
-  border-radius: 3px;
-  backdrop-filter: blur(8px);
+  gap: 12px;
 }
 
-.boot-splash__mark {
-  width: 36px;
-  height: 36px;
-  border-radius: 3px;
-  background: rgba(17, 17, 20, 0.9);
-  border: 1px solid rgba(56, 189, 248, 0.45);
-  color: #38bdf8;
+.boot-hud-panel__top {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: #94a3b8;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.14);
+}
+
+.boot-hud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #38bdf8;
+}
+
+.boot-hud-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #38bdf8;
+}
+
+.boot-hud-lock--ok {
+  color: #10b981;
 }
 
 .boot-splash__title-row {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 0;
 }
 
 .boot-splash__wordmark {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.3em;
   color: #f4f4f5;
-  text-indent: 0.28em;
+  text-indent: 0.3em;
 }
 
-.boot-splash__version {
-  font-size: 11px;
-  color: #71717a;
+.boot-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+
+.boot-checklist__row {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  color: rgba(148, 163, 184, 0.55);
+  transition: color 180ms ease;
+}
+
+.boot-checklist__row--ok {
+  color: #e2e8f0;
+}
+
+.boot-checklist__code {
+  color: rgba(56, 189, 248, 0.72);
+}
+
+.boot-checklist__state {
+  color: rgba(148, 163, 184, 0.45);
+}
+
+.boot-checklist__row--ok .boot-checklist__state {
+  color: #10b981;
 }
 
 .boot-splash__bar-wrap {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(56, 189, 248, 0.14);
 }
 
 .boot-splash__bar {
-  width: 240px;
-  height: 2px;
+  flex: 1;
+  height: 3px;
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
   border-radius: 1px;
@@ -2920,7 +2983,7 @@ button.telemetry-ribbon__item:hover {
   display: block;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, #38bdf8 0%, #10b981 65%, #818cf8 100%);
+  background: linear-gradient(90deg, #38bdf8 0%, #10b981 100%);
   transform-origin: left center;
   transform: scaleX(0);
 }
@@ -2930,35 +2993,6 @@ button.telemetry-ribbon__item:hover {
   color: #38bdf8;
   min-width: 34px;
   text-align: right;
-}
-
-.boot-splash__status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  color: #a1a1aa;
-}
-
-.boot-splash__meta {
-  position: absolute;
-  left: 26px;
-  bottom: 22px;
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  color: rgba(56, 189, 248, 0.45);
-  pointer-events: none;
-}
-
-.boot-splash__skip {
-  position: absolute;
-  right: 26px;
-  bottom: 22px;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  color: rgba(161, 161, 170, 0.45);
-  pointer-events: none;
 }
 
 /* While splash is active, keep shell quietly prepped behind it */

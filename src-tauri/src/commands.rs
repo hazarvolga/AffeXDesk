@@ -5,6 +5,7 @@ use tauri::State;
 use crate::ai_copilot;
 use crate::db::{self, Database};
 use crate::devops;
+use crate::disk_analyzer;
 use crate::git_providers;
 use crate::knowledge;
 use crate::opener;
@@ -454,4 +455,20 @@ pub async fn activate_focus_mode(mode: String) -> Result<devops::FocusModeResult
     tokio::task::spawn_blocking(move || devops::activate_focus_mode(&mode))
         .await
         .map_err(|err| format!("focus mode task failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn scan_disk_breakdown(
+    target_dir: Option<String>,
+) -> Result<disk_analyzer::DiskBreakdownReport, String> {
+    tokio::task::spawn_blocking(move || disk_analyzer::scan_disk_breakdown(target_dir.as_deref()))
+        .await
+        .map_err(|err| format!("disk breakdown scan task failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn move_path_to_trash(path: String) -> Result<u64, String> {
+    tokio::task::spawn_blocking(move || disk_analyzer::move_path_to_trash(&path))
+        .await
+        .map_err(|err| format!("move to trash task failed: {err}"))?
 }

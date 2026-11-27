@@ -268,6 +268,45 @@ export interface FocusModeResult {
   notes: string[];
 }
 
+export type DiskCategory =
+  | "ai_models"
+  | "dev_cache"
+  | "media_render"
+  | "system_cache"
+  | "downloads"
+  | "projects"
+  | "other";
+
+export interface DiskEntry {
+  name: string;
+  path: string;
+  size_bytes: number;
+  pct_of_parent: number;
+  is_dir: boolean;
+  category: DiskCategory | string;
+  safe_to_clean: boolean;
+  clean_hint: string | null;
+}
+
+export interface CategoryTotal {
+  category: DiskCategory | string;
+  label: string;
+  size_bytes: number;
+  pct: number;
+}
+
+export interface DiskBreakdownReport {
+  root_path: string;
+  parent_path: string | null;
+  total_scanned_bytes: number;
+  disk_total_bytes: number;
+  disk_used_bytes: number;
+  disk_available_bytes: number;
+  entries: DiskEntry[];
+  category_totals: CategoryTotal[];
+  quick_wins: DiskEntry[];
+}
+
 export const api = {
   appVersion(): Promise<string> {
     return invoke<string>("app_version");
@@ -448,5 +487,15 @@ export const api = {
     mode: "render" | "webdev" | "publish"
   ): Promise<FocusModeResult> {
     return invoke<FocusModeResult>("activate_focus_mode", { mode });
+  },
+
+  scanDiskBreakdown(targetDir?: string | null): Promise<DiskBreakdownReport> {
+    return invoke<DiskBreakdownReport>("scan_disk_breakdown", {
+      targetDir: targetDir ?? null,
+    });
+  },
+
+  movePathToTrash(path: string): Promise<number> {
+    return invoke<number>("move_path_to_trash", { path });
   },
 };

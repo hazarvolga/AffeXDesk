@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
+  AudioLines,
   Box,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clapperboard,
   Code2,
   Cpu,
   Film,
   FolderOpen,
   HardDrive,
+  Image as ImageIcon,
   Play,
   Radio,
   RefreshCw,
@@ -16,6 +20,7 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  Volume2,
   Zap,
 } from "lucide-react";
 import {
@@ -36,6 +41,20 @@ export interface StudioDevOpsViewProps {
 }
 
 type StudioSubTab = "media" | "devops" | "focus";
+type ModelCategory = "image" | "audio" | "llm";
+
+interface ModelVisualMeta {
+  category: ModelCategory;
+  label: string;
+  accentColor: string;
+  iconBg: string;
+  iconBorder: string;
+  badgeStyle: {
+    background: string;
+    borderColor: string;
+    color: string;
+  };
+}
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
@@ -53,6 +72,77 @@ function formatDuration(seconds: number): string {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
+function classifyAiModel(id: string): ModelVisualMeta {
+  const lower = id.toLowerCase();
+  if (
+    /(flux|image|sdxl|\bsd\b|sd-|stable-diffusion|imagen|dall)/i.test(lower)
+  ) {
+    return {
+      category: "image",
+      label: "Görsel Üretim",
+      accentColor: "#a78bfa",
+      iconBg: "rgba(129, 140, 248, 0.14)",
+      iconBorder: "rgba(129, 140, 248, 0.3)",
+      badgeStyle: {
+        background: "rgba(129, 140, 248, 0.14)",
+        borderColor: "rgba(129, 140, 248, 0.3)",
+        color: "#c4b5fd",
+      },
+    };
+  }
+  if (/(audio|music|ace-step|kokoro|tts|whisper|voice|speech)/i.test(lower)) {
+    return {
+      category: "audio",
+      label: "Ses & Müzik",
+      accentColor: "#f59e0b",
+      iconBg: "rgba(245, 158, 11, 0.14)",
+      iconBorder: "rgba(245, 158, 11, 0.3)",
+      badgeStyle: {
+        background: "rgba(245, 158, 11, 0.14)",
+        borderColor: "rgba(245, 158, 11, 0.3)",
+        color: "#fcd34d",
+      },
+    };
+  }
+  return {
+    category: "llm",
+    label: "LLM / Kod",
+    accentColor: "#38bdf8",
+    iconBg: "rgba(56, 189, 248, 0.14)",
+    iconBorder: "rgba(56, 189, 248, 0.3)",
+    badgeStyle: {
+      background: "rgba(56, 189, 248, 0.14)",
+      borderColor: "rgba(56, 189, 248, 0.28)",
+      color: "#7dd3fc",
+    },
+  };
+}
+
+function parseModelIdentity(
+  id: string,
+  provider: string
+): { name: string; vendor: string } {
+  const slashIdx = id.indexOf("/");
+  if (slashIdx > 0 && slashIdx < id.length - 1) {
+    return {
+      vendor: id.slice(0, slashIdx),
+      name: id.slice(slashIdx + 1),
+    };
+  }
+  return { name: id, vendor: provider };
+}
+
+function isModelLoaded(state: string): boolean {
+  const s = state.toLowerCase();
+  return s === "loaded" || s === "running" || s === "active";
+}
+
+function ModelCategoryIcon({ category }: { category: ModelCategory }) {
+  if (category === "image") return <ImageIcon size={16} />;
+  if (category === "audio") return <AudioLines size={16} />;
+  return <Cpu size={16} />;
+}
+
 export function StudioDevOpsView({
   onOpenFinder,
   onRefreshTelemetry,
@@ -62,6 +152,7 @@ export function StudioDevOpsView({
 
   // Medya & AI
   const [caches, setCaches] = useState<CreativeCacheItem[]>([]);
+  const [showEmptyCaches, setShowEmptyCaches] = useState(false);
   const [aiModels, setAiModels] = useState<LocalAiModel[]>([]);
   const [loadingMedia, setLoadingMedia] = useState(false);
   const [probing, setProbing] = useState(false);
@@ -157,14 +248,35 @@ export function StudioDevOpsView({
     }
   }
 
-  const totalCacheBytes = caches.reduce(
-    (sum, item) => sum + (item.exists ? item.size_bytes : 0),
+  // KPI & özet hesaplamaları
+  const activeCaches = caches
+    .filter((item) => item.exists && item.size_bytes > 0)
+    .sort((a, b) => b.size_bytes - a.size_bytes);
+  const emptyCaches = caches.filter(
+    (item) => !item.exists || item.size_bytes <= 0
+  );
+  const totalCacheBytes = activeCaches.reduce(
+    (sum, item) => sum + item.size_bytes,
     0
   );
+
+  const loadedModelsCount = aiModels.filter((m) =>
+    isModelLoaded(m.state)
+  ).length;
+  const totalModelDiskBytes = aiModels.reduce(
+    (sum, m) => sum + (m.bytes_on_disk && m.bytes_on_disk > 0 ? m.bytes_on_disk : 0),
+    0
+  );
+
+  const totalContainers = docker?.containers.length ?? 0;
+  const runningContainers =
+    docker?.containers.filter((c) => c.state.toLowerCase() === "running")
+      .length ?? 0;
+
   const exposedEnvCount = envItems.filter((item) => item.exposed_risk).length;
 
   return (
-    <div className="view-stack">
+    <div className="view-stack" style={{ width: "100%" }}>
       <header className="view-header">
         <div>
           <h1 className="view-title">Stüdyo &amp; DevOps</h1>
@@ -189,6 +301,136 @@ export function StudioDevOpsView({
           <span>Yenile</span>
         </button>
       </header>
+
+      {/* 1. Üstte 4'lü Operatör KPI Şeridi */}
+      <section
+        className="metrics-grid"
+        aria-label="Stüdyo ve DevOps Operatör Özeti"
+      >
+        {/* KPI 1: Kreatif & Model Cache */}
+        <article className="metric-card">
+          <div className="metric-card__head">
+            <span className="metric-card__label">
+              <HardDrive size={14} className="text-warning" />
+              Kreatif &amp; Model Cache
+            </span>
+            <span className="badge badge--warning tabular">
+              {activeCaches.length} aktif
+            </span>
+          </div>
+          <div className="metric-card__value tabular">
+            {formatBytes(totalCacheBytes)}
+          </div>
+          <p className="metric-card__meta">
+            {emptyCaches.length > 0
+              ? `${emptyCaches.length} boş önbellek gizlendi`
+              : `${caches.length} önbellek tarandı`}
+          </p>
+        </article>
+
+        {/* KPI 2: Yerel AI Modelleri */}
+        <article className="metric-card">
+          <div className="metric-card__head">
+            <span className="metric-card__label">
+              <Sparkles size={14} className="text-cyan" />
+              Yerel AI Modelleri
+            </span>
+            <span
+              className={`badge tabular ${
+                loadedModelsCount > 0 ? "badge--success" : "badge--neutral"
+              }`}
+            >
+              {loadedModelsCount} yüklü
+            </span>
+          </div>
+          <div className="metric-card__value tabular">
+            {aiModels.length}{" "}
+            <span
+              style={{
+                fontSize: "14px",
+                fontWeight: 500,
+                color: "var(--text-secondary)",
+              }}
+            >
+              model
+            </span>
+          </div>
+          <p className="metric-card__meta">
+            {totalModelDiskBytes > 0
+              ? `Diskte ${formatBytes(totalModelDiskBytes)}`
+              : "MLX-Serve & Ollama envanteri"}
+          </p>
+        </article>
+
+        {/* KPI 3: Docker Konteynerleri */}
+        <article className="metric-card">
+          <div className="metric-card__head">
+            <span className="metric-card__label">
+              <Box size={14} className="text-indigo" />
+              Docker Konteynerleri
+            </span>
+            <span
+              className={`badge ${
+                docker?.available ? "badge--success" : "badge--warning"
+              }`}
+            >
+              {docker?.available ? "Aktif" : "Çevrimdışı"}
+            </span>
+          </div>
+          <div className="metric-card__value tabular">
+            {runningContainers}
+            <span
+              style={{
+                fontSize: "16px",
+                fontWeight: 500,
+                color: "var(--text-muted)",
+              }}
+            >
+              {" "}
+              / {totalContainers}
+            </span>
+          </div>
+          <p className="metric-card__meta">
+            {docker?.available
+              ? runningContainers > 0
+                ? `${runningContainers} konteyner çalışıyor`
+                : "Çalışan konteyner yok"
+              : "Docker daemon erişilemiyor"}
+          </p>
+        </article>
+
+        {/* KPI 4: .env Güvenlik */}
+        <article className="metric-card">
+          <div className="metric-card__head">
+            <span className="metric-card__label">
+              <ShieldCheck size={14} className="text-emerald" />
+              .env Güvenlik
+            </span>
+            <span
+              className={`badge ${
+                exposedEnvCount > 0 ? "badge--danger" : "badge--success"
+              }`}
+            >
+              {exposedEnvCount > 0 ? `${exposedEnvCount} Risk` : "Temiz"}
+            </span>
+          </div>
+          <div
+            className={`metric-card__value tabular ${
+              exposedEnvCount > 0 ? "" : "text-emerald"
+            }`}
+            style={
+              exposedEnvCount > 0 ? { color: "var(--accent-danger)" } : undefined
+            }
+          >
+            {exposedEnvCount === 0 ? "Temiz" : `${exposedEnvCount} Riskli`}
+          </div>
+          <p className="metric-card__meta">
+            {envItems.length > 0
+              ? `${envItems.length} proje denetlendi`
+              : "Taranan proje yok"}
+          </p>
+        </article>
+      </section>
 
       {/* 3 Alt Sekme */}
       <div className="toolbar">
@@ -230,161 +472,498 @@ export function StudioDevOpsView({
 
       {/* ALT SEKME 1: MEDYA & AI MODELLERİ */}
       {subTab === "media" && (
-        <div className="view-stack">
-          {/* Kreatif Render Cache Kartları */}
-          <section className="panel">
-            <div className="panel__head">
-              <h2 className="panel__title">
-                <HardDrive size={16} className="text-warning" /> Kreatif Render
-                &amp; Medya Önbellekleri
-              </h2>
-              <span className="badge badge--warning tabular">
-                Toplam: {formatBytes(totalCacheBytes)}
-              </span>
-            </div>
-
-            {caches.length === 0 ? (
-              <p className="empty-hint">
-                Kreatif uygulama cache klasörü taranıyor veya bulunamadı.
-              </p>
-            ) : (
-              <div className="projects-grid">
-                {caches.map((item) => (
-                  <article key={item.id} className="project-card">
-                    <div className="project-card__head">
-                      <div className="project-card__title-wrap">
-                        <h3 className="project-card__title">{item.app}</h3>
-                        <span
-                          className={`badge ${
-                            item.exists ? "badge--info" : "badge--neutral"
-                          }`}
-                        >
-                          {item.exists ? "Mevcut" : "Yok"}
-                        </span>
-                      </div>
-                      <strong className="tabular text-warning">
-                        {formatBytes(item.size_bytes)}
-                      </strong>
-                    </div>
-                    <span className="muted">{item.label}</span>
-                    <span className="mono muted truncate">{item.path}</span>
-                    <div className="project-card__footer">
-                      <button
-                        type="button"
-                        className="btn btn--ghost btn--sm"
-                        disabled={!item.exists}
-                        onClick={() => onOpenFinder(item.path)}
-                      >
-                        <FolderOpen size={13} />
-                        <span>Finder&apos;da Aç</span>
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* FFprobe Medya Müfettişi */}
-          <section className="panel">
-            <div className="panel__head">
-              <h2 className="panel__title">
-                <Film size={16} className="text-cyan" /> FFprobe Medya Müfettişi
-              </h2>
-              <button
-                type="button"
-                className="btn btn--primary btn--sm"
-                onClick={() => void handlePickAndProbeMedia()}
-                disabled={probing}
-              >
-                <Clapperboard size={14} />
-                <span>
-                  {probing ? "Analiz Ediliyor..." : "Medya Dosyası Seç"}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "18px",
+            width: "100%",
+          }}
+        >
+          {/* 2. 2 Sütunlu Bento Düzeni */}
+          <div className="split-grid" style={{ width: "100%" }}>
+            {/* Sol Panel: Aktif Medya & Model Önbellekleri */}
+            <section className="panel" style={{ minWidth: 0 }}>
+              <div className="panel__head">
+                <h2 className="panel__title">
+                  <HardDrive size={16} className="text-warning" /> Aktif Medya
+                  &amp; Model Önbellekleri
+                </h2>
+                <span className="badge badge--warning tabular">
+                  {formatBytes(totalCacheBytes)}
                 </span>
-              </button>
-            </div>
+              </div>
 
-            {!probeResult ? (
-              <p className="empty-hint">
-                Video veya ses dosyasının çözünürlük, FPS, codec, süre ve
-                bitrate değerlerini FFprobe ile incelemek için bir dosya seçin.
-              </p>
-            ) : (
-              <div className="probe-card">
-                <div className="panel__head">
-                  <div>
-                    <strong>{probeResult.file_name}</strong>
-                    <p className="mono muted truncate">{probeResult.path}</p>
+              {loadingMedia && caches.length === 0 ? (
+                <p className="empty-hint">
+                  Kreatif uygulama ve model önbellekleri taranıyor...
+                </p>
+              ) : activeCaches.length === 0 ? (
+                <div
+                  style={{
+                    padding: "20px 16px",
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px dashed var(--border-strong)",
+                    background: "rgba(255, 255, 255, 0.015)",
+                    textAlign: "center",
+                    color: "var(--text-secondary)",
+                    fontSize: "13px",
+                  }}
+                >
+                  Dolu kreatif veya model önbelleği tespit edilmedi.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                  }}
+                >
+                  {activeCaches.map((item) => {
+                    const sharePct =
+                      totalCacheBytes > 0
+                        ? Math.max(
+                            2,
+                            Math.round((item.size_bytes / totalCacheBytes) * 100)
+                          )
+                        : 100;
+                    return (
+                      <article
+                        key={item.id}
+                        style={{
+                          padding: "14px 16px",
+                          borderRadius: "var(--radius-sm)",
+                          background: "var(--bg-surface-elevated)",
+                          border: "1px solid var(--border-subtle)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "10px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              <strong style={{ fontSize: "14px" }}>
+                                {item.app}
+                              </strong>
+                              <span className="badge badge--info tabular">
+                                %{sharePct}
+                              </span>
+                            </div>
+                            <span
+                              className="muted"
+                              style={{ fontSize: "12px", display: "block", marginTop: "2px" }}
+                            >
+                              {item.label}
+                            </span>
+                          </div>
+                          <strong
+                            className="tabular text-warning"
+                            style={{ fontSize: "18px", flexShrink: 0 }}
+                          >
+                            {formatBytes(item.size_bytes)}
+                          </strong>
+                        </div>
+
+                        <div className="progress-track">
+                          <div
+                            className="progress-fill progress-fill--warning"
+                            style={{ width: `${sharePct}%` }}
+                          />
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "10px",
+                          }}
+                        >
+                          <span
+                            className="mono muted truncate"
+                            style={{ minWidth: 0, flex: 1 }}
+                            title={item.path}
+                          >
+                            {item.path}
+                          </span>
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            style={{ flexShrink: 0 }}
+                            onClick={() => onOpenFinder(item.path)}
+                          >
+                            <FolderOpen size={13} />
+                            <span>Finder&apos;da Aç</span>
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Boş / Kurulu Olmayan Önbellekler — Daraltılabilir Tek Satır Çubuk */}
+              {emptyCaches.length > 0 && (
+                <div
+                  style={{
+                    marginTop: "auto",
+                    borderTop: "1px solid var(--border-subtle)",
+                    paddingTop: "10px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setShowEmptyCaches((prev) => !prev)}
+                    aria-expanded={showEmptyCaches}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "8px",
+                      width: "100%",
+                      padding: "7px 10px",
+                      borderRadius: "var(--radius-sm)",
+                      border: "1px solid var(--border-subtle)",
+                      background: "rgba(255, 255, 255, 0.02)",
+                      color: "var(--text-secondary)",
+                      fontSize: "12px",
+                    }}
+                  >
+                    <span>
+                      {emptyCaches.length} boş/kurulu olmayan önbellek gizlendi
+                    </span>
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        color: "var(--accent-cyan)",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {showEmptyCaches ? "Gizle" : "Göster"}
+                      {showEmptyCaches ? (
+                        <ChevronUp size={14} />
+                      ) : (
+                        <ChevronDown size={14} />
+                      )}
+                    </span>
+                  </button>
+
+                  {showEmptyCaches && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px",
+                      }}
+                    >
+                      {emptyCaches.map((item) => (
+                        <div
+                          key={item.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "10px",
+                            padding: "7px 10px",
+                            borderRadius: "var(--radius-sm)",
+                            background: "rgba(255, 255, 255, 0.015)",
+                            border: "1px solid var(--border-subtle)",
+                            fontSize: "12px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              minWidth: 0,
+                            }}
+                          >
+                            <span style={{ fontWeight: 500 }}>{item.app}</span>
+                            <span className="muted truncate">{item.label}</span>
+                          </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              flexShrink: 0,
+                            }}
+                          >
+                            <span className="badge badge--neutral">
+                              {item.exists ? "0 B" : "Yok"}
+                            </span>
+                            {item.exists && (
+                              <button
+                                type="button"
+                                className="icon-btn"
+                                title="Finder'da Aç"
+                                onClick={() => onOpenFinder(item.path)}
+                              >
+                                <FolderOpen size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* Sağ Panel: FFprobe Medya Müfettişi */}
+            <section className="panel" style={{ minWidth: 0 }}>
+              <div className="panel__head">
+                <h2 className="panel__title">
+                  <Film size={16} className="text-cyan" /> FFprobe Medya
+                  Müfettişi
+                </h2>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--sm"
+                  onClick={() => void handlePickAndProbeMedia()}
+                  disabled={probing}
+                >
+                  <Clapperboard size={14} />
+                  <span>
+                    {probing ? "Analiz Ediliyor..." : "Medya Dosyası Seç"}
+                  </span>
+                </button>
+              </div>
+
+              {!probeResult ? (
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: "196px",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "12px",
+                    padding: "24px 20px",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px dashed rgba(56, 189, 248, 0.3)",
+                    background:
+                      "radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.08), transparent 68%)",
+                    textAlign: "center",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "44px",
+                      height: "44px",
+                      borderRadius: "12px",
+                      display: "grid",
+                      placeItems: "center",
+                      background: "rgba(56, 189, 248, 0.14)",
+                      border: "1px solid rgba(56, 189, 248, 0.28)",
+                      color: "var(--accent-cyan)",
+                    }}
+                  >
+                    <Clapperboard size={20} />
+                  </div>
+                  <div style={{ maxWidth: "360px" }}>
+                    <strong style={{ display: "block", fontSize: "14px" }}>
+                      Yayın &amp; Render Kalite Denetimi
+                    </strong>
+                    <p
+                      className="muted"
+                      style={{ margin: "4px 0 0", fontSize: "12.5px" }}
+                    >
+                      Video veya ses dosyası seçerek çözünürlük, FPS, codec,
+                      süre, bitrate ve YouTube{" "}
+                      <span className="mono">-14 LUFS</span> uyumluluğunu
+                      anında doğrulayın.
+                    </p>
                   </div>
                   <button
                     type="button"
-                    className="btn btn--ghost btn--sm"
-                    onClick={() => onOpenFinder(probeResult.path)}
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => void handlePickAndProbeMedia()}
+                    disabled={probing}
                   >
-                    <FolderOpen size={13} />
-                    <span>Finder</span>
+                    <Film size={13} />
+                    <span>
+                      {probing ? "Analiz Ediliyor..." : "Dosya Seç ve İncele"}
+                    </span>
                   </button>
                 </div>
+              ) : (
+                <div className="probe-card" style={{ flex: 1 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      gap: "10px",
+                      padding: "10px 12px",
+                      borderRadius: "var(--radius-sm)",
+                      background: "var(--bg-surface-elevated)",
+                      border: "1px solid var(--border-subtle)",
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <strong className="truncate">
+                          {probeResult.file_name}
+                        </strong>
+                        {/* -14 LUFS Uyumluluk Rozeti */}
+                        {probeResult.lufs != null ? (
+                          <span
+                            className={`badge tabular ${
+                              probeResult.youtube_lufs_ok === true
+                                ? "badge--success"
+                                : probeResult.youtube_lufs_ok === false
+                                ? "badge--warning"
+                                : "badge--info"
+                            }`}
+                          >
+                            <Volume2 size={11} />
+                            {probeResult.lufs.toFixed(1)} LUFS ·{" "}
+                            {probeResult.youtube_lufs_ok === true
+                              ? "-14 LUFS Uyumlu"
+                              : probeResult.youtube_lufs_ok === false
+                              ? "-14 LUFS Sapması"
+                              : "Ölçüldü"}
+                          </span>
+                        ) : (
+                          <span className="badge badge--neutral">
+                            <Volume2 size={11} />
+                            -14 LUFS: Ölçülmedi
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        className="mono muted truncate"
+                        style={{ margin: "3px 0 0" }}
+                        title={probeResult.path}
+                      >
+                        {probeResult.path}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      style={{ flexShrink: 0 }}
+                      onClick={() => onOpenFinder(probeResult.path)}
+                    >
+                      <FolderOpen size={13} />
+                      <span>Finder</span>
+                    </button>
+                  </div>
 
-                <div className="probe-metrics-grid">
-                  <div className="social-stat">
-                    <span className="social-stat__label">Çözünürlük</span>
-                    <strong className="tabular">
-                      {probeResult.width && probeResult.height
-                        ? `${probeResult.width}×${probeResult.height}`
-                        : "Ses / Bilinmiyor"}
-                    </strong>
-                  </div>
-                  <div className="social-stat">
-                    <span className="social-stat__label">FPS</span>
-                    <strong className="tabular">
-                      {probeResult.fps != null
-                        ? `${probeResult.fps.toFixed(2)} fps`
-                        : "—"}
-                    </strong>
-                  </div>
-                  <div className="social-stat">
-                    <span className="social-stat__label">Süre</span>
-                    <strong className="tabular">
-                      {formatDuration(probeResult.duration_secs)}
-                    </strong>
-                  </div>
-                  <div className="social-stat">
-                    <span className="social-stat__label">Boyut &amp; Bitrate</span>
-                    <strong className="tabular">
-                      {formatBytes(probeResult.size_bytes)}
-                      {probeResult.bitrate_kbps
-                        ? ` · ${probeResult.bitrate_kbps} kbps`
-                        : ""}
-                    </strong>
-                  </div>
-                  <div className="social-stat">
-                    <span className="social-stat__label">Video Codec</span>
-                    <strong className="mono">
-                      {probeResult.video_codec || "—"}
-                    </strong>
-                  </div>
-                  <div className="social-stat">
-                    <span className="social-stat__label">Ses Codec</span>
-                    <strong className="mono">
-                      {probeResult.audio_codec || "—"}
-                    </strong>
+                  {/* 6'lı Teknik Metrik Izgarası */}
+                  <div className="probe-metrics-grid">
+                    <div className="social-stat">
+                      <span className="social-stat__label">Çözünürlük</span>
+                      <strong className="tabular">
+                        {probeResult.width && probeResult.height
+                          ? `${probeResult.width}×${probeResult.height}`
+                          : "Ses / Yok"}
+                      </strong>
+                    </div>
+                    <div className="social-stat">
+                      <span className="social-stat__label">FPS</span>
+                      <strong className="tabular">
+                        {probeResult.fps != null
+                          ? `${probeResult.fps.toFixed(2)} fps`
+                          : "—"}
+                      </strong>
+                    </div>
+                    <div className="social-stat">
+                      <span className="social-stat__label">Video Codec</span>
+                      <strong className="mono">
+                        {probeResult.video_codec || "—"}
+                      </strong>
+                    </div>
+                    <div className="social-stat">
+                      <span className="social-stat__label">Ses Codec</span>
+                      <strong className="mono">
+                        {probeResult.audio_codec || "—"}
+                      </strong>
+                    </div>
+                    <div className="social-stat">
+                      <span className="social-stat__label">Süre</span>
+                      <strong className="tabular">
+                        {formatDuration(probeResult.duration_secs)}
+                      </strong>
+                    </div>
+                    <div className="social-stat">
+                      <span className="social-stat__label">Bitrate</span>
+                      <strong className="tabular">
+                        {probeResult.bitrate_kbps
+                          ? `${probeResult.bitrate_kbps} kbps`
+                          : formatBytes(probeResult.size_bytes)}
+                      </strong>
+                      {probeResult.bitrate_kbps != null && (
+                        <span
+                          className="muted tabular"
+                          style={{ fontSize: "11px" }}
+                        >
+                          {formatBytes(probeResult.size_bytes)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </section>
+              )}
+            </section>
+          </div>
 
-          {/* Yerel AI Model Envanteri */}
-          <section className="panel">
+          {/* 3. Yerel AI Model Envanteri -> 3 Sütunlu Görsel Model Kart Izgarası */}
+          <section className="panel" style={{ width: "100%" }}>
             <div className="panel__head">
               <h2 className="panel__title">
                 <Sparkles size={16} className="text-emerald" /> Yerel AI Model
                 Envanteri (MLX-Serve &amp; Ollama)
               </h2>
-              <span className="badge badge--neutral tabular">
-                {aiModels.length} model
-              </span>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  flexWrap: "wrap",
+                }}
+              >
+                {loadedModelsCount > 0 && (
+                  <span className="badge badge--success tabular">
+                    {loadedModelsCount} bellekte
+                  </span>
+                )}
+                <span className="badge badge--neutral tabular">
+                  {aiModels.length} model
+                </span>
+              </div>
             </div>
 
             {aiModels.length === 0 ? (
@@ -393,45 +972,163 @@ export function StudioDevOpsView({
                 çalıştığında modeller burada listelenir.
               </p>
             ) : (
-              <ul className="summary-list">
-                {aiModels.map((model) => (
-                  <li
-                    key={`${model.provider}-${model.id}`}
-                    className="summary-row"
-                  >
-                    <div className="summary-row__main">
-                      <div className="summary-row__title">
-                        <strong className="mono">{model.id}</strong>
-                        <span className="badge badge--info">
-                          {model.provider}
-                        </span>
+              <div className="modules-grid" style={{ gap: "14px" }}>
+                {aiModels.map((model) => {
+                  const visual = classifyAiModel(model.id);
+                  const identity = parseModelIdentity(model.id, model.provider);
+                  const loaded = isModelLoaded(model.state);
+                  const hasDisk =
+                    model.bytes_on_disk != null && model.bytes_on_disk > 0;
+                  const hasRam =
+                    model.bytes_resident != null && model.bytes_resident > 0;
+
+                  return (
+                    <article
+                      key={`${model.provider}-${model.id}`}
+                      className="module-card"
+                      style={{
+                        background: "var(--bg-surface-elevated)",
+                        borderColor: loaded
+                          ? "rgba(16, 185, 129, 0.32)"
+                          : "var(--border-subtle)",
+                        padding: "14px 16px",
+                        gap: "12px",
+                        justifyContent: "space-between",
+                        minWidth: 0,
+                      }}
+                    >
+                      {/* Üst Satır: Kategori İkonu + Kategori Rozeti + Bellek Durumu */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            minWidth: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: "30px",
+                              height: "30px",
+                              borderRadius: "8px",
+                              display: "grid",
+                              placeItems: "center",
+                              flexShrink: 0,
+                              background: visual.iconBg,
+                              border: `1px solid ${visual.iconBorder}`,
+                              color: visual.accentColor,
+                            }}
+                          >
+                            <ModelCategoryIcon category={visual.category} />
+                          </span>
+                          <span
+                            className="badge"
+                            style={visual.badgeStyle}
+                          >
+                            {visual.label}
+                          </span>
+                        </div>
+
                         <span
                           className={`badge ${
-                            model.state === "loaded" ||
-                            model.state === "running"
-                              ? "badge--success"
-                              : "badge--neutral"
+                            loaded ? "badge--success" : "badge--neutral"
                           }`}
                         >
+                          {loaded && (
+                            <span
+                              style={{
+                                width: "6px",
+                                height: "6px",
+                                borderRadius: "999px",
+                                background: "var(--accent-emerald)",
+                                display: "inline-block",
+                              }}
+                            />
+                          )}
                           {model.state}
                         </span>
                       </div>
-                    </div>
-                    <div className="summary-row__metric tabular">
-                      {model.bytes_resident != null && (
-                        <strong className="text-cyan">
-                          RAM {formatBytes(model.bytes_resident)}
-                        </strong>
-                      )}
-                      {model.bytes_on_disk != null && (
-                        <span className="muted">
-                          Disk {formatBytes(model.bytes_on_disk)}
+
+                      {/* Orta Blok: Temiz Model Adı + Üretici Alt Metni */}
+                      <div style={{ minWidth: 0 }}>
+                        <h3
+                          className="truncate"
+                          style={{
+                            margin: 0,
+                            fontSize: "14px",
+                            fontWeight: 650,
+                            color: "var(--text-primary)",
+                          }}
+                          title={model.id}
+                        >
+                          {identity.name}
+                        </h3>
+                        <p
+                          className="mono muted truncate"
+                          style={{ margin: "3px 0 0", fontSize: "11.5px" }}
+                          title={identity.vendor}
+                        >
+                          {identity.vendor}
+                        </p>
+                      </div>
+
+                      {/* Alt Satır: Sağlayıcı Rozeti + Disk / RAM Boyutu */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "8px",
+                          paddingTop: "8px",
+                          borderTop: "1px solid var(--border-subtle)",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <span className="badge badge--info">
+                          {model.provider}
                         </span>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                        <div
+                          className="tabular"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                            fontSize: "12px",
+                          }}
+                        >
+                          {hasRam && (
+                            <strong className="text-cyan">
+                              RAM {formatBytes(model.bytes_resident!)}
+                            </strong>
+                          )}
+                          {hasDisk ? (
+                            <span className="muted">
+                              {formatBytes(model.bytes_on_disk!)}
+                            </span>
+                          ) : (
+                            !hasRam && (
+                              <span
+                                className="muted"
+                                style={{ fontSize: "11px" }}
+                              >
+                                Hazır
+                              </span>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
             )}
           </section>
         </div>
@@ -439,9 +1136,16 @@ export function StudioDevOpsView({
 
       {/* ALT SEKME 2: DOCKER & .ENV HİJYENİ */}
       {subTab === "devops" && (
-        <div className="view-stack">
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "18px",
+            width: "100%",
+          }}
+        >
           {/* Docker Konteynerleri */}
-          <section className="panel">
+          <section className="panel" style={{ width: "100%" }}>
             <div className="panel__head">
               <h2 className="panel__title">
                 <Box size={16} className="text-cyan" /> Docker Konteynerleri
@@ -456,7 +1160,9 @@ export function StudioDevOpsView({
             </div>
 
             {docker?.reclaimable_summary && (
-              <p className="mono muted">{docker.reclaimable_summary}</p>
+              <p className="mono muted" style={{ margin: 0 }}>
+                {docker.reclaimable_summary}
+              </p>
             )}
 
             {!docker?.available ? (
@@ -518,7 +1224,9 @@ export function StudioDevOpsView({
                           type="button"
                           className="btn btn--ghost btn--sm"
                           disabled={busy}
-                          onClick={() => void handleDockerAction(c.id, "restart")}
+                          onClick={() =>
+                            void handleDockerAction(c.id, "restart")
+                          }
                         >
                           <RotateCw size={12} />
                           <span>Yeniden Başlat</span>
@@ -532,7 +1240,7 @@ export function StudioDevOpsView({
           </section>
 
           {/* .env Güvenlik Hijyeni */}
-          <section className="panel">
+          <section className="panel" style={{ width: "100%" }}>
             <div className="panel__head">
               <h2 className="panel__title">
                 <ShieldCheck size={16} className="text-emerald" /> .env Güvenlik
@@ -628,8 +1336,19 @@ export function StudioDevOpsView({
 
       {/* ALT SEKME 3: ÇALIŞMA MODLARI (FOCUS PRESETS) */}
       {subTab === "focus" && (
-        <div className="view-stack">
-          <section className="modules-grid" aria-label="Çalışma Modları">
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "18px",
+            width: "100%",
+          }}
+        >
+          <section
+            className="modules-grid"
+            aria-label="Çalışma Modları"
+            style={{ width: "100%" }}
+          >
             <article className="module-card focus-card">
               <div className="module-card__head">
                 <Clapperboard size={20} className="text-warning" />
@@ -707,11 +1426,15 @@ export function StudioDevOpsView({
           </section>
 
           {focusResult && (
-            <section className="panel" aria-label="Çalışma Modu Sonucu">
+            <section
+              className="panel"
+              aria-label="Çalışma Modu Sonucu"
+              style={{ width: "100%" }}
+            >
               <div className="panel__head">
                 <h2 className="panel__title">
-                  <CheckCircle2 size={16} className="text-emerald" /> Mod Sonucu:{" "}
-                  {focusResult.mode.toUpperCase()}
+                  <CheckCircle2 size={16} className="text-emerald" /> Mod
+                  Sonucu: {focusResult.mode.toUpperCase()}
                 </h2>
                 {focusResult.freed_memory_bytes > 0 && (
                   <span className="badge badge--success tabular">

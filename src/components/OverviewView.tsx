@@ -33,6 +33,7 @@ export type NavTab =
   | "overview"
   | "processes"
   | "projects"
+  | "disk"
   | "git"
   | "knowledge"
   | "studio"
@@ -209,7 +210,12 @@ export function OverviewView({
           </p>
         </article>
 
-        <article className="metric-card">
+        <button
+          type="button"
+          className="metric-card metric-card--interactive"
+          onClick={() => onNavigate("disk")}
+          aria-label="Disk Doluluk — Detaylı Analiz"
+        >
           <div className="metric-card__head">
             <span className="metric-card__label">
               <HardDrive size={15} /> Disk Doluluk
@@ -233,14 +239,17 @@ export function OverviewView({
               }}
             />
           </div>
-          <p className="metric-card__meta tabular">
-            {metrics
-              ? `${formatBytes(diskUsedBytes)} / ${formatBytes(
-                  metrics.disk_total_bytes
-                )}`
-              : "Disk taranıyor..."}
-          </p>
-        </article>
+          <div className="metric-card__footer">
+            <p className="metric-card__meta tabular">
+              {metrics
+                ? `${formatBytes(diskUsedBytes)} / ${formatBytes(
+                    metrics.disk_total_bytes
+                  )}`
+                : "Disk taranıyor..."}
+            </p>
+            <span className="metric-card__cta">Detaylı Analiz →</span>
+          </div>
+        </button>
 
         <article className="metric-card">
           <div className="metric-card__head">

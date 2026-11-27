@@ -6,6 +6,7 @@ import {
   Cpu,
   FolderGit2,
   GitBranch,
+  HardDrive,
   LayoutDashboard,
   Settings,
   ShieldAlert,
@@ -31,6 +32,7 @@ import {
 } from "./components/OverviewView";
 import { ProcessesView } from "./components/ProcessesView";
 import { ProjectsView } from "./components/ProjectsView";
+import { DiskAnalyzerView } from "./components/DiskAnalyzerView";
 import { GitView } from "./components/GitView";
 import { KnowledgeView } from "./components/KnowledgeView";
 import { StudioDevOpsView } from "./components/StudioDevOpsView";
@@ -52,15 +54,16 @@ const NAV_ITEMS: Array<{
   { id: "overview", label: "Genel Bakış", shortcut: "1", icon: LayoutDashboard },
   { id: "processes", label: "Süreçler", shortcut: "2", icon: Cpu },
   { id: "projects", label: "Projeler", shortcut: "3", icon: FolderGit2 },
-  { id: "git", label: "Git / Repolar", shortcut: "4", icon: GitBranch },
-  { id: "knowledge", label: "Bilgi Bankası", shortcut: "5", icon: BookOpen },
+  { id: "disk", label: "Disk Analizi", shortcut: "4", icon: HardDrive },
+  { id: "git", label: "Git / Repolar", shortcut: "5", icon: GitBranch },
+  { id: "knowledge", label: "Bilgi Bankası", shortcut: "6", icon: BookOpen },
   {
     id: "studio",
     label: "Stüdyo & DevOps",
-    shortcut: "6",
+    shortcut: "7",
     icon: Clapperboard,
   },
-  { id: "settings", label: "Ayarlar", shortcut: "7", icon: Settings },
+  { id: "settings", label: "Ayarlar", shortcut: "8", icon: Settings },
 ];
 
 export default function App() {
@@ -203,10 +206,11 @@ export default function App() {
         "1": "overview",
         "2": "processes",
         "3": "projects",
-        "4": "git",
-        "5": "knowledge",
-        "6": "studio",
-        "7": "settings",
+        "4": "disk",
+        "5": "git",
+        "6": "knowledge",
+        "7": "studio",
+        "8": "settings",
       };
       const target = map[event.key];
       if (target) {
@@ -548,6 +552,14 @@ export default function App() {
             onOpenFinder={(p) => void handleOpenFinder(p)}
             onOpenIde={(p) => void handleOpenIde(p)}
             onOpenUrl={(u) => void handleOpenUrl(u)}
+          />
+        )}
+
+        {activeTab === "disk" && (
+          <DiskAnalyzerView
+            onOpenFinder={(p) => void handleOpenFinder(p)}
+            onRefreshTelemetry={refreshTelemetry}
+            onNotify={showToast}
           />
         )}
 

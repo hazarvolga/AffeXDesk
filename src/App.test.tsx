@@ -39,6 +39,8 @@ vi.mock("./lib/api", () => ({
     dockerContainerAction: vi.fn(),
     scanEnvHygiene: vi.fn(),
     activateFocusMode: vi.fn(),
+    scanDiskBreakdown: vi.fn(),
+    movePathToTrash: vi.fn(),
   },
 }));
 
@@ -158,9 +160,66 @@ describe("App", () => {
       error: "Docker çalışmıyor",
     });
     mockedApi.scanEnvHygiene.mockResolvedValue([]);
+    mockedApi.scanDiskBreakdown.mockResolvedValue({
+      root_path: "/Users/hazar",
+      parent_path: "/Users",
+      total_scanned_bytes: 900 * 1024 ** 3,
+      disk_total_bytes: 2000 * 1024 ** 3,
+      disk_used_bytes: 1400 * 1024 ** 3,
+      disk_available_bytes: 600 * 1024 ** 3,
+      entries: [
+        {
+          name: "Library",
+          path: "/Users/hazar/Library",
+          size_bytes: 420 * 1024 ** 3,
+          pct_of_parent: 46.7,
+          is_dir: true,
+          category: "system_cache",
+          safe_to_clean: false,
+          clean_hint: "Önbellek ve uygulama verileri",
+        },
+        {
+          name: "huggingface",
+          path: "/Users/hazar/.cache/huggingface",
+          size_bytes: 280 * 1024 ** 3,
+          pct_of_parent: 31.1,
+          is_dir: true,
+          category: "ai_models",
+          safe_to_clean: true,
+          clean_hint: "İndirilmiş yerel LLM ağırlıkları",
+        },
+      ],
+      category_totals: [
+        {
+          category: "system_cache",
+          label: "Sistem Önbelleği",
+          size_bytes: 420 * 1024 ** 3,
+          pct: 46.7,
+        },
+        {
+          category: "ai_models",
+          label: "AI Modelleri",
+          size_bytes: 280 * 1024 ** 3,
+          pct: 31.1,
+        },
+      ],
+      quick_wins: [
+        {
+          name: "HuggingFace Cache",
+          path: "/Users/hazar/.cache/huggingface",
+          size_bytes: 280 * 1024 ** 3,
+          pct_of_parent: 31.1,
+          is_dir: true,
+          category: "ai_models",
+          safe_to_clean: true,
+          clean_hint: "Kullanılmayan AI modellerini temizleyebilirsiniz",
+        },
+      ],
+    });
+    mockedApi.movePathToTrash.mockResolvedValue(280 * 1024 ** 3);
   });
 
-  it("renders sidebar, live telemetry, and switches tabs with Meta/Alt+1..7 and Meta/Ctrl+K shortcuts", async () => {
+  it("renders sidebar, live telemetry, and switches tabs with Meta/Alt+1..8 and Meta/Ctrl+K shortcuts", async () => {
     render(<App />);
 
     expect(screen.getByText("AffeXDesk")).toBeInTheDocument();
@@ -179,20 +238,25 @@ describe("App", () => {
 
     fireEvent.keyDown(window, { key: "4", metaKey: true });
     expect(
+      await screen.findByRole("heading", { level: 1, name: /Disk Analizi/i })
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "5", metaKey: true });
+    expect(
       await screen.findByRole("heading", { name: /Git & Uzak Repolar/i })
     ).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "5", altKey: true });
+    fireEvent.keyDown(window, { key: "6", altKey: true });
     expect(
       await screen.findByRole("heading", { level: 1, name: /Bilgi Bankası/i })
     ).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "6", metaKey: true });
+    fireEvent.keyDown(window, { key: "7", metaKey: true });
     expect(
       await screen.findByRole("heading", { level: 1, name: /Stüdyo & DevOps/i })
     ).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: "7", metaKey: true });
+    fireEvent.keyDown(window, { key: "8", metaKey: true });
     expect(
       screen.getByRole("heading", { name: /Ayarlar/i })
     ).toBeInTheDocument();
@@ -208,6 +272,51 @@ describe("App", () => {
     expect(
       screen.queryByRole("dialog", { name: /Yerel AI Asistan/i })
     ).not.toBeInTheDocument();
+  });
+
+  it("navigates to Disk Analyzer from Overview Disk card, drills down, and moves item to trash via ConfirmDialog", async () => {
+    render(<App />);
+    await screen.findByText("24.5%");
+
+    // Click Disk Doluluk card on Overview
+    fireEvent.click(
+      screen.getByRole("button", { name: /Disk Doluluk — Detaylı Analiz/i })
+    );
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: /Disk Analizi/i })
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByRole("img", { name: /donut grafiği/i })
+    ).toBeInTheDocument();
+    expect(screen.getByText("HuggingFace Cache")).toBeInTheDocument();
+
+    // Drill down into Library folder
+    fireEvent.click(screen.getByRole("button", { name: /^Library$/i }));
+    await waitFor(() => {
+      expect(mockedApi.scanDiskBreakdown).toHaveBeenCalledWith(
+        "/Users/hazar/Library"
+      );
+    });
+
+    // Click Çöpe Taşı on an entry and confirm in ConfirmDialog
+    fireEvent.click(
+      screen.getByRole("button", { name: /Çöpe Taşı: huggingface/i })
+    );
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("/Users/hazar/.cache/huggingface");
+
+    const confirmButtons = screen.getAllByRole("button", {
+      name: /^Çöpe Taşı$/i,
+    });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockedApi.movePathToTrash).toHaveBeenCalledWith(
+        "/Users/hazar/.cache/huggingface"
+      );
+    });
   });
 
   it("opens ConfirmDialog before force-killing a process and invokes killDevProcess", async () => {

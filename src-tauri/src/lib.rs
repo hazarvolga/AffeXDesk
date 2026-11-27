@@ -2,6 +2,7 @@ pub mod ai_copilot;
 pub mod commands;
 pub mod db;
 pub mod devops;
+pub mod disk_analyzer;
 pub mod git_providers;
 pub mod knowledge;
 pub mod opener;
@@ -56,6 +57,8 @@ pub fn run() {
             commands::docker_container_action,
             commands::scan_env_hygiene,
             commands::activate_focus_mode,
+            commands::scan_disk_breakdown,
+            commands::move_path_to_trash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running AffeXDesk");

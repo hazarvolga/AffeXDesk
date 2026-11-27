@@ -173,17 +173,18 @@ function readPersistedDiskScan(): CachedDiskScan | null {
 }
 
 function persistDiskScan(entry: CachedDiskScan): void {
-  lastDiskScanState = entry;
-  directoryScanCache.set(
-    cacheKeyForDir(entry.currentDir, Boolean(entry.includeProtected)),
-    entry
-  );
-  try {
-    if (typeof window !== "undefined" && window.localStorage) {
-      window.localStorage.setItem(DISK_CACHE_STORAGE_KEY, JSON.stringify(entry));
+  const key = cacheKeyForDir(entry.currentDir, Boolean(entry.includeProtected));
+  directoryScanCache.set(key, entry);
+  // Yalnızca ana Ev Dizini taramasını kalıcı ana durum olarak sakla; alt klasöre girince ana önbellek ezilmesin
+  if (entry.currentDir === null) {
+    lastDiskScanState = entry;
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem(DISK_CACHE_STORAGE_KEY, JSON.stringify(entry));
+      }
+    } catch {
+      // localStorage dolu veya erişilemezse yalnızca bellek önbelleğini kullan
     }
-  } catch {
-    // localStorage dolu veya erişilemezse yalnızca bellek önbelleğini kullan
   }
 }
 
@@ -267,17 +268,27 @@ export function DiskAnalyzerView({
 
   const loadDirectory = useCallback(
     async (
-      targetDir: string | null,
+      rawTargetDir: string | null,
       options?: { force?: boolean; includeProtected?: boolean }
     ) => {
+      const homeRootPath = lastDiskScanState?.report?.root_path ?? null;
+      const targetDir =
+        rawTargetDir && homeRootPath && rawTargetDir === homeRootPath
+          ? null
+          : rawTargetDir;
+
       const useFull = options?.includeProtected ?? fullDiskMode;
       const key = cacheKeyForDir(targetDir, useFull);
       const reqId = ++loadRequestIdRef.current;
 
       if (!options?.force) {
-        const cached = directoryScanCache.get(key);
+        const cached =
+          directoryScanCache.get(key) ??
+          (targetDir === null
+            ? directoryScanCache.get(cacheKeyForDir(null, !useFull)) ??
+              lastDiskScanState
+            : undefined);
         if (cached) {
-          lastDiskScanState = cached;
           setReport(cached.report);
           setCurrentDir(cached.currentDir);
           setScannedAt(cached.scannedAt);
@@ -609,12 +620,12 @@ export function DiskAnalyzerView({
             </button>
             <button
               type="button"
-              className="btn btn--ghost"
+              className={`btn ${currentDir !== null ? "btn--primary" : "btn--ghost"}`}
               onClick={() => void loadDirectory(null)}
-              disabled={loading || currentDir === null}
+              disabled={currentDir === null}
             >
               <Home size={14} />
-              <span>Ev Dizini</span>
+              <span>{currentDir !== null ? "← Ev Dizinine Dön" : "Ev Dizini"}</span>
             </button>
             <button
               type="button"
@@ -1251,9 +1262,20 @@ export function DiskAnalyzerView({
             </div>
           </div>
 
-          <span className="badge badge--neutral tabular">
-            {visibleEntries.length} öğe
-          </span>
+          <div className="header-actions">
+            {selectedCategory && (
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => setSelectedCategory(null)}
+              >
+                Filtreyi Kaldır (Tümünü Göster)
+              </button>
+            )}
+            <span className="badge badge--neutral tabular">
+              {visibleEntries.length} öğe
+            </span>
+          </div>
         </div>
 
         {loading && !report ? (

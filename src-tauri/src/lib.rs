@@ -57,6 +57,8 @@ pub fn run() {
             commands::docker_container_action,
             commands::scan_env_hygiene,
             commands::activate_focus_mode,
+            commands::check_full_disk_access,
+            commands::open_full_disk_access_settings,
             commands::get_cached_disk_breakdown,
             commands::scan_disk_breakdown,
             commands::move_path_to_trash,

@@ -7,6 +7,7 @@ import {
   FolderOpen,
   HardDrive,
   Home,
+  Lock,
   PieChart,
   RefreshCw,
   ShieldCheck,
@@ -128,6 +129,7 @@ interface CachedDiskScan {
   currentDir: string | null;
   report: DiskBreakdownReport;
   scannedAt: string;
+  includeProtected?: boolean;
 }
 
 const directoryScanCache = new Map<string, CachedDiskScan>();
@@ -210,6 +212,12 @@ export function DiskAnalyzerView({
   const [scannedAt, setScannedAt] = useState<string | null>(
     () => initialCached?.scannedAt ?? null
   );
+  const [fullDiskMode, setFullDiskMode] = useState<boolean>(
+    () => Boolean(initialCached?.includeProtected)
+  );
+  const [hasFullDiskAccess, setHasFullDiskAccess] = useState<boolean | null>(
+    null
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -218,8 +226,12 @@ export function DiskAnalyzerView({
   const [trashing, setTrashing] = useState(false);
 
   const loadDirectory = useCallback(
-    async (targetDir: string | null, options?: { force?: boolean }) => {
-      const key = cacheKeyForDir(targetDir);
+    async (
+      targetDir: string | null,
+      options?: { force?: boolean; includeProtected?: boolean }
+    ) => {
+      const useFull = options?.includeProtected ?? fullDiskMode;
+      const key = `${cacheKeyForDir(targetDir)}::${useFull ? "full" : "safe"}`;
       if (!options?.force) {
         const cached = directoryScanCache.get(key);
         if (cached) {
@@ -238,17 +250,20 @@ export function DiskAnalyzerView({
       try {
         let pending = !options?.force ? inFlightScans.get(key) : undefined;
         if (!pending) {
-          pending = api.scanDiskBreakdown(targetDir);
+          pending = api.scanDiskBreakdown(targetDir, useFull);
           inFlightScans.set(key, pending);
         }
         const data = await pending;
         inFlightScans.delete(key);
         const nowIso = new Date().toISOString();
-        persistDiskScan({
+        const entry: CachedDiskScan = {
           currentDir: targetDir,
           report: data,
           scannedAt: nowIso,
-        });
+          includeProtected: useFull,
+        };
+        directoryScanCache.set(key, entry);
+        persistDiskScan(entry);
         setReport(data);
         setCurrentDir(targetDir);
         setScannedAt(nowIso);
@@ -262,13 +277,27 @@ export function DiskAnalyzerView({
         setLoading(false);
       }
     },
-    [onNotify]
+    [fullDiskMode, onNotify]
   );
 
   useEffect(() => {
-    if (report) return;
     let cancelled = false;
     void (async () => {
+      let fda = false;
+      try {
+        fda = await api.checkFullDiskAccess();
+        if (!cancelled) {
+          setHasFullDiskAccess(fda);
+          if (fda) {
+            setFullDiskMode(true);
+          }
+        }
+      } catch {
+        // yoksay
+      }
+
+      if (report) return;
+
       try {
         const backendCached = await api.getCachedDiskBreakdown();
         if (cancelled) return;
@@ -277,18 +306,22 @@ export function DiskAnalyzerView({
             currentDir: null,
             report: backendCached.report,
             scannedAt: backendCached.scanned_at,
+            includeProtected: Boolean(backendCached.include_protected),
           };
           persistDiskScan(entry);
           setReport(entry.report);
           setCurrentDir(null);
           setScannedAt(entry.scannedAt);
+          if (backendCached.include_protected) {
+            setFullDiskMode(true);
+          }
           return;
         }
       } catch {
         // Disk önbelleği okunamazsa ilk taramaya düş
       }
       if (!cancelled) {
-        void loadDirectory(null);
+        void loadDirectory(null, { includeProtected: fda });
       }
     })();
     return () => {
@@ -297,6 +330,24 @@ export function DiskAnalyzerView({
     // Yalnızca ilk açılışta kayıtlı tarama yoksa otomatik bir kez tara; sonraki girişlerde disk önbelleği korunur.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleOpenFdaSettings = useCallback(async () => {
+    try {
+      await api.openFullDiskAccessSettings();
+      onNotify(
+        "info",
+        "Tam Disk Erişimi penceresi açıldı. AffeXDesk'i aktif ettikten sonra 'Tam Disk Modu' ile Yeniden Tara'ya basın."
+      );
+    } catch (err) {
+      onNotify("error", `Sistem Ayarları açılamadı: ${String(err)}`);
+    }
+  }, [onNotify]);
+
+  const handleToggleFullDiskMode = useCallback(() => {
+    const next = !fullDiskMode;
+    setFullDiskMode(next);
+    void loadDirectory(currentDir, { force: true, includeProtected: next });
+  }, [fullDiskMode, currentDir, loadDirectory]);
 
   const handleConfirmTrash = useCallback(async () => {
     if (!trashTarget) return;
@@ -395,6 +446,18 @@ export function DiskAnalyzerView({
         <div className="header-actions">
           <button
             type="button"
+            className={`btn ${fullDiskMode ? "btn--primary" : "btn--ghost"}`}
+            onClick={handleToggleFullDiskMode}
+            disabled={loading}
+            title="Movies, Downloads, Documents, Desktop, .Trash ve /Applications dahil tüm diski tara"
+          >
+            {fullDiskMode ? <ShieldCheck size={14} /> : <Lock size={14} />}
+            <span>
+              {fullDiskMode ? "Tam Disk Modu: Açık" : "Tam Disk Modu (Tümü)"}
+            </span>
+          </button>
+          <button
+            type="button"
             className="btn btn--ghost"
             onClick={() => void loadDirectory(null)}
             disabled={loading || currentDir === null}
@@ -413,6 +476,28 @@ export function DiskAnalyzerView({
           </button>
         </div>
       </header>
+
+      {hasFullDiskAccess === false && (
+        <div className="fda-banner" role="note">
+          <div className="fda-banner__text">
+            <Lock size={15} className="text-warning" />
+            <span>
+              <strong>Tam Disk Erişimi kapalı:</strong>{" "}
+              <code>Movies</code>, <code>Downloads</code>, <code>Documents</code>,{" "}
+              <code>Desktop</code> ve <code>/Applications</code> dahil tüm diski{" "}
+              <strong>izin penceresi çıkmadan</strong> görmek için macOS Sistem
+              Ayarları'ndan AffeXDesk'e bir kez izin verin.
+            </span>
+          </div>
+          <button
+            type="button"
+            className="btn btn--sm btn--secondary"
+            onClick={() => void handleOpenFdaSettings()}
+          >
+            Tam Disk Erişimi Ayarını Aç
+          </button>
+        </div>
+      )}
 
       {/* 1. Üst Özet Kartları */}
       <section className="disk-summary-grid" aria-label="Disk Özeti">

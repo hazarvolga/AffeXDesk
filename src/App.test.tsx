@@ -40,6 +40,8 @@ vi.mock("./lib/api", () => ({
     dockerContainerAction: vi.fn(),
     scanEnvHygiene: vi.fn(),
     activateFocusMode: vi.fn(),
+    checkFullDiskAccess: vi.fn(),
+    openFullDiskAccessSettings: vi.fn(),
     getCachedDiskBreakdown: vi.fn(),
     scanDiskBreakdown: vi.fn(),
     movePathToTrash: vi.fn(),
@@ -154,6 +156,8 @@ describe("App", () => {
       fallback: false,
       actions: [],
     });
+    mockedApi.checkFullDiskAccess.mockResolvedValue(true);
+    mockedApi.openFullDiskAccessSettings.mockResolvedValue();
     mockedApi.getCachedDiskBreakdown.mockResolvedValue(null);
     mockedApi.scanCreativeCaches.mockResolvedValue([]);
     mockedApi.scanLocalAiModels.mockResolvedValue([]);
@@ -299,7 +303,8 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Library$/i }));
     await waitFor(() => {
       expect(mockedApi.scanDiskBreakdown).toHaveBeenCalledWith(
-        "/Users/hazar/Library"
+        "/Users/hazar/Library",
+        true
       );
     });
 

@@ -458,6 +458,20 @@ pub async fn activate_focus_mode(mode: String) -> Result<devops::FocusModeResult
 }
 
 #[tauri::command]
+pub async fn check_full_disk_access() -> Result<bool, String> {
+    tokio::task::spawn_blocking(disk_analyzer::check_full_disk_access)
+        .await
+        .map_err(|err| format!("full disk access check failed: {err}"))
+}
+
+#[tauri::command]
+pub async fn open_full_disk_access_settings() -> Result<(), String> {
+    tokio::task::spawn_blocking(disk_analyzer::open_full_disk_access_settings)
+        .await
+        .map_err(|err| format!("open full disk access settings failed: {err}"))?
+}
+
+#[tauri::command]
 pub async fn get_cached_disk_breakdown() -> Result<Option<disk_analyzer::CachedDiskBreakdown>, String>
 {
     tokio::task::spawn_blocking(disk_analyzer::get_cached_disk_breakdown)
@@ -468,10 +482,14 @@ pub async fn get_cached_disk_breakdown() -> Result<Option<disk_analyzer::CachedD
 #[tauri::command]
 pub async fn scan_disk_breakdown(
     target_dir: Option<String>,
+    include_protected: Option<bool>,
 ) -> Result<disk_analyzer::DiskBreakdownReport, String> {
-    tokio::task::spawn_blocking(move || disk_analyzer::scan_disk_breakdown(target_dir.as_deref()))
-        .await
-        .map_err(|err| format!("disk breakdown scan task failed: {err}"))?
+    let full = include_protected.unwrap_or(false);
+    tokio::task::spawn_blocking(move || {
+        disk_analyzer::scan_disk_breakdown(target_dir.as_deref(), full)
+    })
+    .await
+    .map_err(|err| format!("disk breakdown scan task failed: {err}"))?
 }
 
 #[tauri::command]

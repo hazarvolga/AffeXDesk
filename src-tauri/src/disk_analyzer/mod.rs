@@ -48,6 +48,47 @@ pub struct DiskBreakdownReport {
 pub struct CachedDiskBreakdown {
     pub report: DiskBreakdownReport,
     pub scanned_at: String,
+    #[serde(default)]
+    pub include_protected: bool,
+}
+
+#[cfg(target_os = "macos")]
+pub fn check_full_disk_access() -> bool {
+    // /Library/Application Support/com.apple.TCC yalnızca Tam Disk Erişimi (FDA) verildiğinde okunabilir
+    // ve okuma denemesi macOS izin penceresi (popup) tetiklemez.
+    if fs::read_dir("/Library/Application Support/com.apple.TCC").is_ok() {
+        return true;
+    }
+    if let Some(home) = dirs::home_dir() {
+        let safari_dir = home.join("Library/Safari");
+        if safari_dir.exists() && fs::read_dir(&safari_dir).is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn check_full_disk_access() -> bool {
+    true
+}
+
+#[cfg(target_os = "macos")]
+pub fn open_full_disk_access_settings() -> Result<(), String> {
+    use std::process::Command;
+    let status = Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+        .status()
+        .map_err(|err| format!("Sistem Ayarları açılamadı: {err}"))?;
+    if !status.success() {
+        return Err("Sistem Ayarları Tam Disk Erişimi ekranı açılamadı.".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn open_full_disk_access_settings() -> Result<(), String> {
+    Ok(())
 }
 
 struct QuickWinsCache {
@@ -87,10 +128,11 @@ pub fn get_cached_disk_breakdown() -> Option<CachedDiskBreakdown> {
     Some(parsed)
 }
 
-fn save_cached_disk_breakdown(report: &DiskBreakdownReport) {
+fn save_cached_disk_breakdown(report: &DiskBreakdownReport, include_protected: bool) {
     let entry = CachedDiskBreakdown {
         report: report.clone(),
         scanned_at: chrono::Utc::now().to_rfc3339(),
+        include_protected,
     };
     if let Ok(mut guard) = last_report_cache().lock() {
         *guard = Some(entry.clone());
@@ -466,36 +508,39 @@ fn dir_size_recursive_fs(root: &Path) -> u64 {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn measure_dir_size(path: &Path) -> u64 {
-    // macOS'ta ~/Library doğrudan `du` ile taranırsa Mail/Messages/Safari TCC izin pencereleri açılır.
-    // Bunun yerine yalnızca TCC dışı alt klasörleri ölç.
+fn measure_dir_size(path: &Path, include_protected: bool) -> u64 {
+    // macOS'ta Tam Disk Erişimi yoksa ~/Library doğrudan `du` ile taranırsa Mail/Messages/Safari TCC izin pencereleri açılır.
+    // Tam Disk Modu açık değilse yalnızca TCC dışı alt klasörleri ölç.
     #[cfg(target_os = "macos")]
-    if let Some(home) = dirs::home_dir() {
-        let lib_dir = normalize_path(&home.join("Library"));
-        if normalize_path(path) == lib_dir {
-            let mut sum: u64 = 0;
-            if let Ok(rd) = fs::read_dir(path) {
-                for entry in rd.flatten() {
-                    let child = entry.path();
-                    if is_macos_tcc_gated(&child, Some(&home)) {
-                        continue;
-                    }
-                    if let Ok(m) = fs::symlink_metadata(&child) {
-                        if m.file_type().is_symlink() {
+    if !include_protected {
+        if let Some(home) = dirs::home_dir() {
+            let lib_dir = normalize_path(&home.join("Library"));
+            if normalize_path(path) == lib_dir {
+                let mut sum: u64 = 0;
+                if let Ok(rd) = fs::read_dir(path) {
+                    for entry in rd.flatten() {
+                        let child = entry.path();
+                        if is_macos_tcc_gated(&child, Some(&home)) {
                             continue;
                         }
-                        if m.is_dir() {
-                            sum = sum.saturating_add(measure_dir_size_raw(&child));
-                        } else if m.is_file() {
-                            sum = sum.saturating_add(m.len());
+                        if let Ok(m) = fs::symlink_metadata(&child) {
+                            if m.file_type().is_symlink() {
+                                continue;
+                            }
+                            if m.is_dir() {
+                                sum = sum.saturating_add(measure_dir_size_raw(&child));
+                            } else if m.is_file() {
+                                sum = sum.saturating_add(m.len());
+                            }
                         }
                     }
                 }
+                return sum;
             }
-            return sum;
         }
     }
 
+    let _ = include_protected;
     measure_dir_size_raw(path)
 }
 
@@ -516,7 +561,7 @@ fn measure_dir_size_raw(path: &Path) -> u64 {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn measure_dir_size(path: &Path) -> u64 {
+fn measure_dir_size(path: &Path, _include_protected: bool) -> u64 {
     dir_size_recursive_fs(path)
 }
 
@@ -532,12 +577,12 @@ fn measure_path_size(path: &Path) -> u64 {
         return meta.len();
     }
     if meta.is_dir() {
-        return measure_dir_size(path);
+        return measure_dir_size(path, true);
     }
     0
 }
 
-fn measure_paths_parallel(items: &[(String, PathBuf, bool)]) -> Vec<u64> {
+fn measure_paths_parallel(items: &[(String, PathBuf, bool)], include_protected: bool) -> Vec<u64> {
     let len = items.len();
     if len == 0 {
         return Vec::new();
@@ -558,7 +603,7 @@ fn measure_paths_parallel(items: &[(String, PathBuf, bool)]) -> Vec<u64> {
                 }
                 let (_, ref path, is_dir) = items[idx];
                 let size = if is_dir {
-                    measure_dir_size(path)
+                    measure_dir_size(path, include_protected)
                 } else {
                     fs::symlink_metadata(path).map(|m| m.len()).unwrap_or(0)
                 };
@@ -575,7 +620,12 @@ fn measure_paths_parallel(items: &[(String, PathBuf, bool)]) -> Vec<u64> {
         .collect()
 }
 
-fn scan_quick_wins(home: &Path, disk_used_bytes: u64, force_refresh: bool) -> Vec<DiskEntry> {
+fn scan_quick_wins(
+    home: &Path,
+    disk_used_bytes: u64,
+    force_refresh: bool,
+    include_protected: bool,
+) -> Vec<DiskEntry> {
     if !force_refresh {
         if let Ok(guard) = quick_wins_cache().lock() {
             if let Some(ref cached) = *guard {
@@ -586,36 +636,61 @@ fn scan_quick_wins(home: &Path, disk_used_bytes: u64, force_refresh: bool) -> Ve
         }
     }
 
-    let candidates: [(&str, &str); 14] = [
-        ("HuggingFace Cache", ".cache/huggingface"),
-        ("Ollama Modelleri", ".ollama"),
-        ("LM Studio", ".lmstudio"),
-        ("MLX-Serve", ".mlx-serve"),
-        ("macOS Caches", "Library/Caches"),
-        ("Xcode DerivedData", "Library/Developer/Xcode/DerivedData"),
-        ("Docker Disk İmajı", "Library/Containers/com.docker.docker"),
-        ("Cargo Cache", ".cargo"),
-        ("npm Cache", ".npm"),
-        ("pnpm Store", "Library/pnpm/store"),
-        ("Homebrew Cache", "Library/Caches/Homebrew"),
-        ("Gradle Cache", ".gradle"),
-        ("Python / UV Cache", ".cache/uv"),
-        ("Geliştirme (dev)", "dev"),
+    let mut candidate_paths: Vec<(String, PathBuf)> = vec![
+        ("HuggingFace Cache".to_string(), home.join(".cache/huggingface")),
+        ("Ollama Modelleri".to_string(), home.join(".ollama")),
+        ("LM Studio".to_string(), home.join(".lmstudio")),
+        ("MLX-Serve".to_string(), home.join(".mlx-serve")),
+        ("macOS Caches".to_string(), home.join("Library/Caches")),
+        (
+            "Xcode DerivedData".to_string(),
+            home.join("Library/Developer/Xcode/DerivedData"),
+        ),
+        (
+            "Docker Disk İmajı".to_string(),
+            home.join("Library/Containers/com.docker.docker"),
+        ),
+        ("Cargo Cache".to_string(), home.join(".cargo")),
+        ("npm Cache".to_string(), home.join(".npm")),
+        ("pnpm Store".to_string(), home.join("Library/pnpm/store")),
+        ("Homebrew Cache".to_string(), home.join("Library/Caches/Homebrew")),
+        ("Gradle Cache".to_string(), home.join(".gradle")),
+        ("Python / UV Cache".to_string(), home.join(".cache/uv")),
+        ("Geliştirme (dev)".to_string(), home.join("dev")),
     ];
 
-    let existing: Vec<(String, PathBuf, bool)> = candidates
-        .iter()
-        .filter_map(|(label, rel)| {
-            let full = home.join(rel);
+    if include_protected {
+        candidate_paths.extend([
+            ("İndirilenler (Downloads)".to_string(), home.join("Downloads")),
+            ("Filmler (Movies)".to_string(), home.join("Movies")),
+            ("Belgeler (Documents)".to_string(), home.join("Documents")),
+            ("Masaüstü (Desktop)".to_string(), home.join("Desktop")),
+            ("Çöp Sepeti (.Trash)".to_string(), home.join(".Trash")),
+            (
+                "Application Support".to_string(),
+                home.join("Library/Application Support"),
+            ),
+            ("Uygulamalar (/Applications)".to_string(), PathBuf::from("/Applications")),
+            ("Homebrew (/opt/homebrew)".to_string(), PathBuf::from("/opt/homebrew")),
+            (
+                "Sistem App Support (/Library)".to_string(),
+                PathBuf::from("/Library/Application Support"),
+            ),
+        ]);
+    }
+
+    let existing: Vec<(String, PathBuf, bool)> = candidate_paths
+        .into_iter()
+        .filter_map(|(label, full)| {
             let meta = fs::symlink_metadata(&full).ok()?;
             if meta.file_type().is_symlink() {
                 return None;
             }
-            Some(((*label).to_string(), full, meta.is_dir()))
+            Some((label, full, meta.is_dir()))
         })
         .collect();
 
-    let sizes = measure_paths_parallel(&existing);
+    let sizes = measure_paths_parallel(&existing, include_protected);
 
     let mut items: Vec<DiskEntry> = existing
         .into_iter()
@@ -675,7 +750,10 @@ fn expand_tilde(raw: &str, home: Option<&Path>) -> PathBuf {
     PathBuf::from(trimmed)
 }
 
-pub fn scan_disk_breakdown(target_dir: Option<&str>) -> Result<DiskBreakdownReport, String> {
+pub fn scan_disk_breakdown(
+    target_dir: Option<&str>,
+    include_protected: bool,
+) -> Result<DiskBreakdownReport, String> {
     let home = dirs::home_dir();
     let requested_root = match target_dir.map(str::trim).filter(|s| !s.is_empty()) {
         Some(dir) => expand_tilde(dir, home.as_deref()),
@@ -701,13 +779,21 @@ pub fn scan_disk_breakdown(target_dir: Option<&str>) -> Result<DiskBreakdownRepo
     let root_path = root.to_string_lossy().to_string();
     let parent_path = root.parent().map(|p| p.to_string_lossy().to_string());
 
+    let is_home_root = match &home {
+        Some(h) => {
+            let h_canon = fs::canonicalize(h).unwrap_or_else(|_| h.clone());
+            target_dir.is_none() || root == h_canon
+        }
+        None => false,
+    };
+
     let read_dir = fs::read_dir(&root)
         .map_err(|err| format!("Klasör okunamadı ({root_path}): {err}"))?;
 
     let mut children: Vec<(String, PathBuf, bool)> = Vec::new();
     for entry in read_dir.flatten() {
         let path = entry.path();
-        if is_macos_tcc_gated(&path, home.as_deref()) {
+        if !include_protected && is_macos_tcc_gated(&path, home.as_deref()) {
             continue;
         }
         let meta = match fs::symlink_metadata(&path) {
@@ -721,7 +807,22 @@ pub fn scan_disk_breakdown(target_dir: Option<&str>) -> Result<DiskBreakdownRepo
         children.push((name, path, meta.is_dir()));
     }
 
-    let sizes = measure_paths_parallel(&children);
+    // Tam Disk Modunda ana ev taramasına sistem genelindeki büyük klasörleri de ekle
+    #[cfg(target_os = "macos")]
+    if is_home_root && include_protected {
+        for (label, sys_path) in [
+            ("/Applications", "/Applications"),
+            ("/opt/homebrew", "/opt/homebrew"),
+            ("/Library/Application Support", "/Library/Application Support"),
+        ] {
+            let pb = PathBuf::from(sys_path);
+            if pb.exists() && pb.is_dir() {
+                children.push((label.to_string(), pb, true));
+            }
+        }
+    }
+
+    let sizes = measure_paths_parallel(&children, include_protected);
     let total_scanned_bytes: u64 = sizes
         .iter()
         .fold(0u64, |acc, &sz| acc.saturating_add(sz));
@@ -790,17 +891,9 @@ pub fn scan_disk_breakdown(target_dir: Option<&str>) -> Result<DiskBreakdownRepo
 
     let (disk_total_bytes, disk_used_bytes, disk_available_bytes) = read_primary_disk_space();
 
-    let is_home_root = match &home {
-        Some(h) => {
-            let h_canon = fs::canonicalize(h).unwrap_or_else(|_| h.clone());
-            target_dir.is_none() || root == h_canon
-        }
-        None => false,
-    };
-
     let quick_wins = if is_home_root {
         if let Some(ref h) = home {
-            scan_quick_wins(h, disk_used_bytes, false)
+            scan_quick_wins(h, disk_used_bytes, true, include_protected)
         } else {
             Vec::new()
         }
@@ -823,7 +916,7 @@ pub fn scan_disk_breakdown(target_dir: Option<&str>) -> Result<DiskBreakdownRepo
     };
 
     if is_home_root {
-        save_cached_disk_breakdown(&report);
+        save_cached_disk_breakdown(&report, include_protected);
     }
 
     Ok(report)
@@ -1034,7 +1127,7 @@ mod tests {
         fs::write(&small_file, vec![b'B'; 2 * 1024]).expect("write small file");
         fs::write(sub_dir.join("bundle.js"), vec![b'C'; 48 * 1024]).expect("write bundle");
 
-        let report = scan_disk_breakdown(Some(&root.to_string_lossy()))
+        let report = scan_disk_breakdown(Some(&root.to_string_lossy()), false)
             .expect("scan_disk_breakdown succeeds");
 
         assert_eq!(report.entries.len(), 3);

@@ -489,19 +489,33 @@ export const api = {
     return invoke<FocusModeResult>("activate_focus_mode", { mode });
   },
 
+  checkFullDiskAccess(): Promise<boolean> {
+    return invoke<boolean>("check_full_disk_access");
+  },
+
+  openFullDiskAccessSettings(): Promise<void> {
+    return invoke<void>("open_full_disk_access_settings");
+  },
+
   getCachedDiskBreakdown(): Promise<{
     report: DiskBreakdownReport;
     scanned_at: string;
+    include_protected?: boolean;
   } | null> {
     return invoke<{
       report: DiskBreakdownReport;
       scanned_at: string;
+      include_protected?: boolean;
     } | null>("get_cached_disk_breakdown");
   },
 
-  scanDiskBreakdown(targetDir?: string | null): Promise<DiskBreakdownReport> {
+  scanDiskBreakdown(
+    targetDir?: string | null,
+    includeProtected = false
+  ): Promise<DiskBreakdownReport> {
     return invoke<DiskBreakdownReport>("scan_disk_breakdown", {
       targetDir: targetDir ?? null,
+      includeProtected,
     });
   },
 

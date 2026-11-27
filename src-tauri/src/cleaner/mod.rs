@@ -274,10 +274,37 @@ fn parse_docker_df_json_lines(stdout: &str) -> DockerDfSummary {
 }
 
 fn inspect_docker_df() -> DockerDfSummary {
-    match run_cli_with_timeout("docker", &["system", "df", "--format", "{{json .}}"], 180) {
-        Ok(stdout) => parse_docker_df_json_lines(&stdout),
-        Err(_) => DockerDfSummary::default(),
+    // Önce 15 sn içinde tam `docker system df` almayı dene
+    if let Ok(stdout) =
+        run_cli_with_timeout("docker", &["system", "df", "--format", "{{json .}}"], 15)
+    {
+        return parse_docker_df_json_lines(&stdout);
     }
+
+    // 500 GB+ büyük Docker disklerinde `system df` 2+ dk sürebilir;
+    // Docker çalışıyorsa (docker info < 3 sn) kalemleri gizlemek yerine yine de göster
+    if run_cli_with_timeout("docker", &["info", "--format", "{{.ServerVersion}}"], 3).is_ok() {
+        let raw_size = dirs::home_dir()
+            .map(|h| {
+                measure_dir_fast(&h.join("Library/Containers/com.docker.docker/Data/vms/0/data"))
+            })
+            .unwrap_or(0);
+        return DockerDfSummary {
+            available: true,
+            // Gerçek alt kırılım ölçülemedi ama Build Cache & İmaj temizliği her zaman erişilebilir kalsın
+            build_cache_bytes: raw_size.max(1024 * 1024),
+            build_cache_count: 0,
+            images_reclaimable_bytes: 1024 * 1024,
+            images_total_count: 0,
+            images_active_count: 0,
+            containers_reclaimable_bytes: 0,
+            containers_stopped_count: 0,
+            volumes_reclaimable_bytes: 0,
+            volumes_unused_count: 0,
+        };
+    }
+
+    DockerDfSummary::default()
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]

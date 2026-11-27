@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   ChevronRight,
+  Cpu,
   File,
+  Flame,
   Folder,
   FolderOpen,
   HardDrive,
@@ -17,8 +19,8 @@ import {
 import {
   api,
   type CategoryTotal,
+  type DiskAiModel,
   type DiskBreakdownReport,
-  type DiskEntry,
 } from "../lib/api";
 import { formatBytes, formatPct } from "../lib/format";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -136,6 +138,14 @@ interface CachedDiskScan {
 const directoryScanCache = new Map<string, CachedDiskScan>();
 let lastDiskScanState: CachedDiskScan | null = null;
 const inFlightScans = new Map<string, Promise<DiskBreakdownReport>>();
+let cachedDiskAiModels: DiskAiModel[] | null = null;
+
+interface DeleteTargetInfo {
+  name: string;
+  path: string;
+  size_bytes: number;
+  clean_hint?: string | null;
+}
 
 function cacheKeyForDir(dir: string | null, includeProtected = false): string {
   return `${dir ?? "__HOME__"}::${includeProtected ? "full" : "safe"}`;
@@ -181,6 +191,7 @@ export function clearDiskAnalyzerCache(): void {
   lastDiskScanState = null;
   directoryScanCache.clear();
   inFlightScans.clear();
+  cachedDiskAiModels = null;
   try {
     if (typeof window !== "undefined" && window.localStorage) {
       window.localStorage.removeItem(DISK_CACHE_STORAGE_KEY);
@@ -230,8 +241,19 @@ export function DiskAnalyzerView({
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
-  const [trashTarget, setTrashTarget] = useState<DiskEntry | null>(null);
+  const [trashTarget, setTrashTarget] = useState<DeleteTargetInfo | null>(null);
   const [trashing, setTrashing] = useState(false);
+  const [permDeleteTarget, setPermDeleteTarget] =
+    useState<DeleteTargetInfo | null>(null);
+  const [permDeleteStep, setPermDeleteStep] = useState<1 | 2>(1);
+  const [permDeleting, setPermDeleting] = useState(false);
+  const [aiModels, setAiModels] = useState<DiskAiModel[]>(
+    () => cachedDiskAiModels ?? []
+  );
+  const [aiModelsLoading, setAiModelsLoading] = useState(false);
+  const [aiFilter, setAiFilter] = useState<
+    "all" | "unused" | "incomplete" | "active"
+  >("all");
 
   const loadRequestIdRef = useRef(0);
   const mountedRef = useRef(true);
@@ -374,6 +396,100 @@ export function DiskAnalyzerView({
     setFullDiskMode(next);
     void loadDirectory(currentDir, { force: true, includeProtected: next });
   }, [fullDiskMode, currentDir, loadDirectory]);
+
+  const loadAiModels = useCallback(async (force = false) => {
+    if (!force && cachedDiskAiModels) {
+      setAiModels(cachedDiskAiModels);
+      return;
+    }
+    setAiModelsLoading(true);
+    try {
+      const list = await api.scanDiskAiModels();
+      cachedDiskAiModels = list;
+      setAiModels(list);
+    } catch {
+      // AI model taraması başarısız olursa ana disk analizini bozma
+    } finally {
+      setAiModelsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAiModels(false);
+  }, [loadAiModels]);
+
+  const openPermanentDelete = useCallback((target: DeleteTargetInfo) => {
+    setPermDeleteTarget(target);
+    setPermDeleteStep(1);
+  }, []);
+
+  const handleConfirmPermanentDelete = useCallback(async () => {
+    if (!permDeleteTarget) return;
+    if (permDeleteStep === 1) {
+      setPermDeleteStep(2);
+      return;
+    }
+    setPermDeleting(true);
+    try {
+      const freed = await api.deletePathPermanently(permDeleteTarget.path);
+      onNotify(
+        "success",
+        `${permDeleteTarget.name} kalıcı olarak silindi (${formatBytes(
+          freed || permDeleteTarget.size_bytes
+        )}).`
+      );
+      setPermDeleteTarget(null);
+      setPermDeleteStep(1);
+      clearDiskAnalyzerCache();
+      await Promise.all([
+        loadDirectory(currentDir, { force: true }),
+        loadAiModels(true),
+        onRefreshTelemetry(),
+      ]);
+    } catch (err) {
+      const raw = String(err);
+      if (raw.includes("protected_path")) {
+        onNotify(
+          "error",
+          `Korunan sistem, .git veya kullanıcı kök klasörü kalıcı silinemez: ${permDeleteTarget.name}`
+        );
+      } else if (raw.includes("symlink_not_allowed")) {
+        onNotify(
+          "error",
+          `Sembolik bağlantı (symlink) güvenlik nedeniyle silinemedi: ${permDeleteTarget.name}`
+        );
+      } else {
+        onNotify("error", `Kalıcı silme başarısız: ${raw}`);
+      }
+      setPermDeleteTarget(null);
+      setPermDeleteStep(1);
+    } finally {
+      setPermDeleting(false);
+    }
+  }, [
+    permDeleteTarget,
+    permDeleteStep,
+    currentDir,
+    loadDirectory,
+    loadAiModels,
+    onRefreshTelemetry,
+    onNotify,
+  ]);
+
+  const visibleAiModels = useMemo(() => {
+    if (aiFilter === "all") return aiModels;
+    return aiModels.filter((m) => m.status === aiFilter);
+  }, [aiModels, aiFilter]);
+
+  const totalAiModelsBytes = useMemo(
+    () => aiModels.reduce((acc, m) => acc + m.size_bytes, 0),
+    [aiModels]
+  );
+
+  const unusedAiModelsCount = useMemo(
+    () => aiModels.filter((m) => m.status !== "active").length,
+    [aiModels]
+  );
 
   const handleConfirmTrash = useCallback(async () => {
     if (!trashTarget) return;
@@ -896,16 +1012,190 @@ export function DiskAnalyzerView({
                       type="button"
                       className="btn btn--danger-soft btn--sm"
                       onClick={() => setTrashTarget(item)}
-                      disabled={trashing}
+                      disabled={trashing || permDeleting}
                     >
                       <Trash2 size={13} />
                       <span>Çöpe Taşı</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--danger btn--sm"
+                      onClick={() => openPermanentDelete(item)}
+                      disabled={trashing || permDeleting}
+                      title="Çöp Sepetine taşımadan doğrudan kalıcı sil (2 aşamalı onay)"
+                    >
+                      <Flame size={13} />
+                      <span>Kalıcı Sil</span>
                     </button>
                   </div>
                 </article>
               );
             })}
           </div>
+        </section>
+      )}
+
+      {/* 3.5 Yerel AI Modelleri (Aktif & Kullanılmayan) */}
+      {(aiModels.length > 0 || aiModelsLoading) && (
+        <section
+          className="panel"
+          aria-label="Yerel AI Modelleri"
+        >
+          <div className="panel__head">
+            <div>
+              <h2 className="panel__title">
+                <Cpu size={16} className="text-indigo" /> Yerel AI Modelleri
+                (HuggingFace / MLX-Serve / LM Studio)
+              </h2>
+              <p className="view-subtitle">
+                Aktif sunucudaki modeller işaretlenir; kullanılmayan veya yarım
+                kalmış modelleri tek tek Çöpe Taşıyabilir veya 2 aşamalı onayla
+                Kalıcı Silebilirsiniz.
+              </p>
+            </div>
+            <div className="header-actions">
+              <span className="badge badge--info tabular">
+                {aiModels.length} model · {formatBytes(totalAiModelsBytes)}
+              </span>
+              {unusedAiModelsCount > 0 && (
+                <span className="badge badge--warning tabular">
+                  {unusedAiModelsCount} kullanılmıyor / yarım
+                </span>
+              )}
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => void loadAiModels(true)}
+                disabled={aiModelsLoading}
+              >
+                <RefreshCw
+                  size={12}
+                  className={aiModelsLoading ? "spin" : ""}
+                />
+                <span>Yenile</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="ai-filter-row" role="group" aria-label="AI Model Filtresi">
+            {(
+              [
+                ["all", `Tümü (${aiModels.length})`],
+                [
+                  "unused",
+                  `Kullanılmayanlar (${
+                    aiModels.filter((m) => m.status === "unused").length
+                  })`,
+                ],
+                [
+                  "incomplete",
+                  `Yarım Kalıntılar (${
+                    aiModels.filter((m) => m.status === "incomplete").length
+                  })`,
+                ],
+                [
+                  "active",
+                  `Aktif (${
+                    aiModels.filter((m) => m.status === "active").length
+                  })`,
+                ],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`subtab-btn ${
+                  aiFilter === key ? "subtab-btn--active" : ""
+                }`}
+                onClick={() => setAiFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {visibleAiModels.length === 0 ? (
+            <div className="empty-inline">
+              {aiModelsLoading
+                ? "Yerel AI modelleri taranıyor..."
+                : "Bu filtrede model bulunamadı."}
+            </div>
+          ) : (
+            <div className="cleaner-list">
+              {visibleAiModels.map((model) => {
+                const badgeClass =
+                  model.status === "active"
+                    ? "badge--success"
+                    : model.status === "incomplete"
+                    ? "badge--neutral"
+                    : "badge--warning";
+                const deleteInfo: DeleteTargetInfo = {
+                  name: model.id,
+                  path: model.path,
+                  size_bytes: model.size_bytes,
+                  clean_hint:
+                    model.status === "active"
+                      ? "DİKKAT: Bu model şu an yerel AI sunucusunda aktif görünüyor."
+                      : `${model.provider} · ${model.status_label}`,
+                };
+                return (
+                  <div key={model.path} className="ai-model-row">
+                    <div className="ai-model-row__info">
+                      <div className="cleaner-row__title-row">
+                        <strong className="cleaner-row__title truncate">
+                          {model.id}
+                        </strong>
+                        <span className="badge badge--neutral">
+                          {model.provider}
+                        </span>
+                        <span className={`badge ${badgeClass}`}>
+                          {model.status_label}
+                        </span>
+                      </div>
+                      <span
+                        className="mono muted truncate"
+                        title={model.path}
+                        style={{ fontSize: 11 }}
+                      >
+                        {model.path}
+                      </span>
+                    </div>
+                    <div className="ai-model-row__actions">
+                      <strong className="cleaner-row__size tabular">
+                        {formatBytes(model.size_bytes)}
+                      </strong>
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm"
+                        onClick={() => onOpenFinder(model.path)}
+                        title="Finder'da Aç"
+                      >
+                        <FolderOpen size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--danger-soft btn--sm"
+                        onClick={() => setTrashTarget(deleteInfo)}
+                        disabled={trashing || permDeleting}
+                      >
+                        <Trash2 size={13} />
+                        <span>Çöpe Taşı</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--danger btn--sm"
+                        onClick={() => openPermanentDelete(deleteInfo)}
+                        disabled={trashing || permDeleting}
+                      >
+                        <Flame size={13} />
+                        <span>Kalıcı Sil</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
 
@@ -1052,11 +1342,21 @@ export function DiskAnalyzerView({
                       type="button"
                       className="btn btn--danger-soft btn--sm"
                       onClick={() => setTrashTarget(entry)}
-                      disabled={trashing}
+                      disabled={trashing || permDeleting}
                       aria-label={`Çöpe Taşı: ${entry.name}`}
                     >
                       <Trash2 size={13} />
                       <span>Çöpe Taşı</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--danger btn--sm"
+                      onClick={() => openPermanentDelete(entry)}
+                      disabled={trashing || permDeleting}
+                      aria-label={`Kalıcı Sil: ${entry.name}`}
+                    >
+                      <Flame size={13} />
+                      <span>Kalıcı Sil</span>
                     </button>
                   </div>
                 </li>
@@ -1089,6 +1389,50 @@ export function DiskAnalyzerView({
         busy={trashing}
         onConfirm={() => void handleConfirmTrash()}
         onCancel={() => setTrashTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(permDeleteTarget)}
+        title={
+          permDeleteStep === 1
+            ? "Kalıcı Olarak Sil (Adım 1/2)"
+            : "Emin misiniz? Geri Alınamaz! (Adım 2/2)"
+        }
+        description={
+          permDeleteTarget
+            ? permDeleteStep === 1
+              ? `"${permDeleteTarget.name}" öğesi Çöp Sepetine taşınmadan DOĞRUDAN silinmek üzere seçildi. İkinci onay adımına geçmek istiyor musunuz?`
+              : `SON ONAY: "${permDeleteTarget.name}" (${formatBytes(
+                  permDeleteTarget.size_bytes
+                )}) diskten kalıcı olarak yok edilecek ve geri getirilemeyecek. Gerçekten emin misiniz?`
+            : ""
+        }
+        details={
+          permDeleteTarget
+            ? [
+                permDeleteTarget.path,
+                `Boyut: ${formatBytes(permDeleteTarget.size_bytes)}`,
+                ...(permDeleteTarget.clean_hint
+                  ? [permDeleteTarget.clean_hint]
+                  : []),
+              ]
+            : undefined
+        }
+        confirmLabel={
+          permDeleteStep === 1
+            ? "Devam Et (1/2)"
+            : "Evet, Kalıcı Olarak Sil"
+        }
+        cancelLabel="Vazgeç"
+        tone="danger"
+        busy={permDeleting}
+        onConfirm={() => void handleConfirmPermanentDelete()}
+        onCancel={() => {
+          if (!permDeleting) {
+            setPermDeleteTarget(null);
+            setPermDeleteStep(1);
+          }
+        }}
       />
         </>
       )}

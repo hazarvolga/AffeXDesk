@@ -45,6 +45,8 @@ vi.mock("./lib/api", () => ({
     getCachedDiskBreakdown: vi.fn(),
     scanDiskBreakdown: vi.fn(),
     movePathToTrash: vi.fn(),
+    deletePathPermanently: vi.fn(),
+    scanDiskAiModels: vi.fn(),
     getCachedCleanerScan: vi.fn(),
     scanSystemCleaner: vi.fn(),
     runSystemCleaner: vi.fn(),
@@ -163,6 +165,8 @@ describe("App", () => {
     mockedApi.checkFullDiskAccess.mockResolvedValue(true);
     mockedApi.openFullDiskAccessSettings.mockResolvedValue();
     mockedApi.getCachedDiskBreakdown.mockResolvedValue(null);
+    mockedApi.scanDiskAiModels.mockResolvedValue([]);
+    mockedApi.deletePathPermanently.mockResolvedValue(0);
     mockedApi.getCachedCleanerScan.mockResolvedValue(null);
     mockedApi.scanSystemCleaner.mockResolvedValue({
       scanned_at: "2026-11-27T15:00:00Z",

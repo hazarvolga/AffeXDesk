@@ -506,6 +506,25 @@ pub async fn move_path_to_trash(path: String) -> Result<u64, String> {
 }
 
 #[tauri::command]
+pub async fn delete_path_permanently(path: String) -> Result<u64, String> {
+    tokio::task::spawn_blocking(move || disk_analyzer::delete_path_permanently(&path))
+        .await
+        .map_err(|err| format!("permanent delete task failed: {err}"))?
+}
+
+#[tauri::command]
+pub async fn scan_disk_ai_models(
+    state: State<'_, AppState>,
+) -> Result<Vec<disk_analyzer::DiskAiModel>, String> {
+    let settings = load_settings_map(&state)?;
+    let live_models = studio::scan_local_ai_models(&settings).await;
+    let active_ids: Vec<String> = live_models.into_iter().map(|m| m.id).collect();
+    tokio::task::spawn_blocking(move || disk_analyzer::scan_disk_ai_models(&active_ids))
+        .await
+        .map_err(|err| format!("scan disk ai models task failed: {err}"))
+}
+
+#[tauri::command]
 pub async fn get_cached_cleaner_scan() -> Result<Option<cleaner::CleanerScanReport>, String> {
     tokio::task::spawn_blocking(cleaner::get_cached_cleaner_scan)
         .await

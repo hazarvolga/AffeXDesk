@@ -307,6 +307,16 @@ export interface DiskBreakdownReport {
   quick_wins: DiskEntry[];
 }
 
+export interface DiskAiModel {
+  id: string;
+  provider: "huggingface" | "mlx-serve" | "ollama" | "lmstudio" | string;
+  path: string;
+  size_bytes: number;
+  last_modified_days: number;
+  status: "active" | "unused" | "incomplete" | string;
+  status_label: string;
+}
+
 export interface CleanerItem {
   id: string;
   title: string;
@@ -558,6 +568,14 @@ export const api = {
 
   movePathToTrash(path: string): Promise<number> {
     return invoke<number>("move_path_to_trash", { path });
+  },
+
+  deletePathPermanently(path: string): Promise<number> {
+    return invoke<number>("delete_path_permanently", { path });
+  },
+
+  scanDiskAiModels(): Promise<DiskAiModel[]> {
+    return invoke<DiskAiModel[]>("scan_disk_ai_models");
   },
 
   getCachedCleanerScan(): Promise<CleanerScanReport | null> {

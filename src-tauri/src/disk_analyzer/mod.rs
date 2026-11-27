@@ -1150,6 +1150,265 @@ if (Test-Path -LiteralPath $p -PathType Container) {
     Ok(reclaimed_bytes)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiskAiModel {
+    pub id: String,
+    pub provider: String, // "huggingface" | "mlx-serve" | "ollama" | "lmstudio"
+    pub path: String,
+    pub size_bytes: u64,
+    pub last_modified_days: u64,
+    pub status: String, // "active" | "unused" | "incomplete"
+    pub status_label: String,
+}
+
+fn dir_has_incomplete_blobs(dir: &Path) -> bool {
+    let blobs = dir.join("blobs");
+    if let Ok(rd) = fs::read_dir(blobs) {
+        for entry in rd.flatten() {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if name.ends_with(".incomplete") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn days_since_modified(path: &Path) -> u64 {
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return 0;
+    };
+    let Ok(modified) = meta.modified() else {
+        return 0;
+    };
+    modified
+        .elapsed()
+        .map(|d| d.as_secs() / 86_400)
+        .unwrap_or(0)
+}
+
+fn normalize_model_key(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
+pub fn scan_disk_ai_models(active_model_ids: &[String]) -> Vec<DiskAiModel> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+
+    let active_set: std::collections::HashSet<String> = active_model_ids
+        .iter()
+        .map(|s| normalize_model_key(s))
+        .collect();
+
+    // (display_id, provider, path)
+    let mut candidates: Vec<(String, String, PathBuf)> = Vec::new();
+
+    // 1. HuggingFace Hub cache: ~/.cache/huggingface/hub/models--org--repo
+    let hf_hub = home.join(".cache/huggingface/hub");
+    if let Ok(rd) = fs::read_dir(&hf_hub) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                continue;
+            };
+            if meta.file_type().is_symlink() || !meta.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Some(rest) = name.strip_prefix("models--") {
+                let display = rest.replace("--", "/");
+                candidates.push((display, "huggingface".to_string(), path));
+            }
+        }
+    }
+
+    // 2. MLX-Serve models: ~/.mlx-serve/models/<org>/<repo>
+    let mlx_models = home.join(".mlx-serve/models");
+    if let Ok(org_rd) = fs::read_dir(&mlx_models) {
+        for org_entry in org_rd.flatten() {
+            let org_path = org_entry.path();
+            let Ok(org_meta) = fs::symlink_metadata(&org_path) else {
+                continue;
+            };
+            if org_meta.file_type().is_symlink() || !org_meta.is_dir() {
+                continue;
+            }
+            let org_name = org_entry.file_name().to_string_lossy().to_string();
+            if let Ok(repo_rd) = fs::read_dir(&org_path) {
+                for repo_entry in repo_rd.flatten() {
+                    let repo_path = repo_entry.path();
+                    let Ok(repo_meta) = fs::symlink_metadata(&repo_path) else {
+                        continue;
+                    };
+                    if repo_meta.file_type().is_symlink() || !repo_meta.is_dir() {
+                        continue;
+                    }
+                    let repo_name = repo_entry.file_name().to_string_lossy().to_string();
+                    candidates.push((
+                        format!("{org_name}/{repo_name}"),
+                        "mlx-serve".to_string(),
+                        repo_path,
+                    ));
+                }
+            }
+        }
+    }
+
+    // 3. LM Studio models: ~/.lmstudio/models/<org>/<repo>
+    let lms_models = home.join(".lmstudio/models");
+    if let Ok(org_rd) = fs::read_dir(&lms_models) {
+        for org_entry in org_rd.flatten() {
+            let org_path = org_entry.path();
+            let Ok(org_meta) = fs::symlink_metadata(&org_path) else {
+                continue;
+            };
+            if org_meta.file_type().is_symlink() || !org_meta.is_dir() {
+                continue;
+            }
+            let org_name = org_entry.file_name().to_string_lossy().to_string();
+            if let Ok(repo_rd) = fs::read_dir(&org_path) {
+                for repo_entry in repo_rd.flatten() {
+                    let repo_path = repo_entry.path();
+                    let Ok(repo_meta) = fs::symlink_metadata(&repo_path) else {
+                        continue;
+                    };
+                    if repo_meta.file_type().is_symlink() || !repo_meta.is_dir() {
+                        continue;
+                    }
+                    let repo_name = repo_entry.file_name().to_string_lossy().to_string();
+                    candidates.push((
+                        format!("{org_name}/{repo_name}"),
+                        "lmstudio".to_string(),
+                        repo_path,
+                    ));
+                }
+            }
+        }
+    }
+
+    let measure_input: Vec<(String, PathBuf, bool)> = candidates
+        .iter()
+        .map(|(id, _, p)| (id.clone(), p.clone(), true))
+        .collect();
+    let sizes = measure_paths_parallel(&measure_input, false);
+
+    let mut models: Vec<DiskAiModel> = candidates
+        .into_iter()
+        .zip(sizes)
+        .map(|((id, provider, path), size_bytes)| {
+            let days = days_since_modified(&path);
+            let is_incomplete = size_bytes < 10 * 1024 * 1024 || dir_has_incomplete_blobs(&path);
+            let norm_id = normalize_model_key(&id);
+            let is_active = !is_incomplete
+                && active_set.iter().any(|live| {
+                    live == &norm_id
+                        || live.ends_with(&format!("/{norm_id}"))
+                        || norm_id.ends_with(&format!("/{live}"))
+                });
+
+            let (status, status_label) = if is_incomplete {
+                ("incomplete".to_string(), "Yarım Kalıntı".to_string())
+            } else if is_active {
+                ("active".to_string(), "Aktif (Sunucuda)".to_string())
+            } else if days > 0 {
+                ("unused".to_string(), format!("Kullanılmıyor ({days}g)"))
+            } else {
+                ("unused".to_string(), "Kullanılmıyor".to_string())
+            };
+
+            DiskAiModel {
+                id,
+                provider,
+                path: path.to_string_lossy().to_string(),
+                size_bytes,
+                last_modified_days: days,
+                status,
+                status_label,
+            }
+        })
+        .collect();
+
+    models.sort_by(|a, b| {
+        b.size_bytes
+            .cmp(&a.size_bytes)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    models
+}
+
+pub fn delete_path_permanently(path: &str) -> Result<u64, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("protected_path".to_string());
+    }
+
+    let home = dirs::home_dir();
+    let target = expand_tilde(trimmed, home.as_deref());
+
+    if is_protected_path_with_home(&target, home.as_deref()) {
+        return Err("protected_path".to_string());
+    }
+
+    // `.git` dizini veya içindeki herhangi bir dosya kalıcı silinemez
+    if target
+        .components()
+        .any(|c| c.as_os_str().to_string_lossy() == ".git")
+    {
+        return Err("protected_path".to_string());
+    }
+
+    let meta = match fs::symlink_metadata(&target) {
+        Ok(m) => m,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Err(format!("Yol bulunamadı: {}", target.to_string_lossy()));
+        }
+        Err(err) => {
+            return Err(format!(
+                "Yol bilgisi alınamadı ({}): {err}",
+                target.to_string_lossy()
+            ));
+        }
+    };
+
+    if meta.file_type().is_symlink() {
+        return Err("symlink_not_allowed".to_string());
+    }
+
+    let canonical = fs::canonicalize(&target).map_err(|err| {
+        format!(
+            "Yol çözümlenemedi ({}): {err}",
+            target.to_string_lossy()
+        )
+    })?;
+
+    if is_protected_path_with_home(&canonical, home.as_deref()) {
+        return Err("protected_path".to_string());
+    }
+
+    let reclaimed_bytes = measure_path_size(&canonical);
+
+    if meta.is_dir() {
+        fs::remove_dir_all(&canonical).map_err(|err| {
+            format!(
+                "Klasör kalıcı olarak silinemedi ({}): {err}",
+                canonical.to_string_lossy()
+            )
+        })?;
+    } else {
+        fs::remove_file(&canonical).map_err(|err| {
+            format!(
+                "Dosya kalıcı olarak silinemedi ({}): {err}",
+                canonical.to_string_lossy()
+            )
+        })?;
+    }
+
+    invalidate_all_disk_caches();
+    crate::cleaner::invalidate_cleaner_cache();
+    Ok(reclaimed_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1166,6 +1425,35 @@ mod tests {
         ));
         fs::create_dir_all(&dir).expect("create temp dir");
         dir
+    }
+
+    #[test]
+    fn delete_path_permanently_rejects_protected_and_deletes_temp_dir() {
+        assert_eq!(
+            delete_path_permanently("/System"),
+            Err("protected_path".to_string())
+        );
+        assert_eq!(
+            delete_path_permanently("/tmp/demo/.git"),
+            Err("protected_path".to_string())
+        );
+
+        let test_base = dirs::home_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join(".cache");
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = test_base.join(format!("affexdesk_perm_delete_{}_{nanos}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let payload = dir.join("model.bin");
+        fs::write(&payload, vec![b'X'; 32 * 1024]).expect("write payload");
+        assert!(dir.exists());
+
+        let freed = delete_path_permanently(&dir.to_string_lossy()).expect("delete succeeds");
+        assert!(freed > 0);
+        assert!(!dir.exists());
     }
 
     #[test]

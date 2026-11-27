@@ -63,6 +63,8 @@ pub fn run() {
             commands::get_cached_disk_breakdown,
             commands::scan_disk_breakdown,
             commands::move_path_to_trash,
+            commands::delete_path_permanently,
+            commands::scan_disk_ai_models,
             commands::get_cached_cleaner_scan,
             commands::scan_system_cleaner,
             commands::run_system_cleaner,

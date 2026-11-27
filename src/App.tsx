@@ -49,6 +49,7 @@ import { KnowledgeView } from "./components/KnowledgeView";
 import { StudioDevOpsView } from "./components/StudioDevOpsView";
 import { SettingsView } from "./components/SettingsView";
 import { AiDrawer } from "./components/AiDrawer";
+import { BootSplash } from "./components/BootSplash";
 
 interface ToastMessage {
   id: number;
@@ -79,6 +80,19 @@ const NAV_ITEMS: Array<{
 ];
 
 export default function App() {
+  const [bootStage, setBootStage] = useState<"splash" | "entering" | "ready">(
+    () => {
+      const mode = (import.meta as unknown as { env?: { MODE?: string } }).env?.MODE;
+      if (mode === "test") return "ready";
+      if (
+        typeof window !== "undefined" &&
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      ) {
+        return "ready";
+      }
+      return "splash";
+    }
+  );
   const [activeTab, setActiveTab] = useState<NavTab>("overview");
   const [processFilter, setProcessFilter] = useState<ProcessFilter>("all");
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>("all");
@@ -525,13 +539,37 @@ export default function App() {
     settings.module_social_bridge === "true" ||
     Boolean(socialSnapshot?.connected);
 
+  const handleBootComplete = useCallback(() => {
+    setBootStage("entering");
+    window.setTimeout(() => {
+      setBootStage("ready");
+    }, 650);
+  }, []);
+
   return (
-    <div className="app-shell">
+    <div
+      className={`app-shell${
+        bootStage === "splash"
+          ? " app-shell--booting"
+          : bootStage === "entering"
+          ? " app-shell--entering"
+          : ""
+      }`}
+    >
+      {bootStage === "splash" && (
+        <BootSplash version={version} onComplete={handleBootComplete} />
+      )}
       <aside className="sidebar" aria-label="Ana Gezinme">
         <div className="brand">
-          <div className="brand__mark">
+          <button
+            type="button"
+            className="brand__mark brand__mark--interactive"
+            onClick={() => setBootStage("splash")}
+            title="Açılış animasyonunu tekrar oynat"
+            aria-label="AffeXDesk açılış animasyonunu oynat"
+          >
             <TerminalSquare size={18} />
-          </div>
+          </button>
           <div className="brand__text">
             <strong>AffeXDesk</strong>
             <span className="mono muted">v{version}</span>
@@ -760,128 +798,130 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === "overview" && (
-          <OverviewView
-            metrics={metrics}
-            processes={processes}
-            workspaces={workspaces}
-            scanReport={scanReport}
-            uptimeMap={uptimeMap}
-            socialSnapshot={socialSnapshot}
-            showSocialCard={showSocialCard}
-            loadingSocial={loadingSocial}
-            onRefreshSocial={() => void refreshSocialSnapshot()}
-            loading={loadingTelemetry || loadingProjects}
-            onRefresh={() => {
-              void refreshTelemetry();
-              void refreshWorkspacesAndProjects();
-              if (showSocialCard) void refreshSocialSnapshot();
-            }}
-            onAddWorkspace={() => void handleAddWorkspace()}
-            onNavigate={handleNavigate}
-          />
-        )}
+        <div key={activeTab} className="tab-stage">
+          {activeTab === "overview" && (
+            <OverviewView
+              metrics={metrics}
+              processes={processes}
+              workspaces={workspaces}
+              scanReport={scanReport}
+              uptimeMap={uptimeMap}
+              socialSnapshot={socialSnapshot}
+              showSocialCard={showSocialCard}
+              loadingSocial={loadingSocial}
+              onRefreshSocial={() => void refreshSocialSnapshot()}
+              loading={loadingTelemetry || loadingProjects}
+              onRefresh={() => {
+                void refreshTelemetry();
+                void refreshWorkspacesAndProjects();
+                if (showSocialCard) void refreshSocialSnapshot();
+              }}
+              onAddWorkspace={() => void handleAddWorkspace()}
+              onNavigate={handleNavigate}
+            />
+          )}
 
-        {activeTab === "processes" && (
-          <ProcessesView
-            report={processes}
-            loading={loadingTelemetry}
-            filter={processFilter}
-            onFilterChange={setProcessFilter}
-            onRefresh={() => void refreshTelemetry()}
-            onKillProcess={handleKillProcess}
-            onNotify={showToast}
-          />
-        )}
+          {activeTab === "processes" && (
+            <ProcessesView
+              report={processes}
+              loading={loadingTelemetry}
+              filter={processFilter}
+              onFilterChange={setProcessFilter}
+              onRefresh={() => void refreshTelemetry()}
+              onKillProcess={handleKillProcess}
+              onNotify={showToast}
+            />
+          )}
 
-        {activeTab === "projects" && (
-          <ProjectsView
-            scanReport={scanReport}
-            uptimeMap={uptimeMap}
-            loading={loadingProjects}
-            checkingUptime={checkingUptime}
-            filter={projectFilter}
-            clients={clients}
-            clientProjects={clientProjects}
-            onAssignClient={handleAssignProjectToClient}
-            onConnectRemote={(client) => void handleConnectRemoteClient(client)}
-            onFilterChange={setProjectFilter}
-            onAddWorkspace={() => void handleAddWorkspace()}
-            onRescan={() => void refreshWorkspacesAndProjects()}
-            onCheckAllUptime={() => void handleCheckAllUptime()}
-            onCleanCaches={handleCleanCaches}
-            onSaveProjectUrl={handleSaveProjectUrl}
-            onOpenFinder={(p) => void handleOpenFinder(p)}
-            onOpenIde={(p) => void handleOpenIde(p)}
-            onOpenUrl={(u) => void handleOpenUrl(u)}
-          />
-        )}
+          {activeTab === "projects" && (
+            <ProjectsView
+              scanReport={scanReport}
+              uptimeMap={uptimeMap}
+              loading={loadingProjects}
+              checkingUptime={checkingUptime}
+              filter={projectFilter}
+              clients={clients}
+              clientProjects={clientProjects}
+              onAssignClient={handleAssignProjectToClient}
+              onConnectRemote={(client) => void handleConnectRemoteClient(client)}
+              onFilterChange={setProjectFilter}
+              onAddWorkspace={() => void handleAddWorkspace()}
+              onRescan={() => void refreshWorkspacesAndProjects()}
+              onCheckAllUptime={() => void handleCheckAllUptime()}
+              onCleanCaches={handleCleanCaches}
+              onSaveProjectUrl={handleSaveProjectUrl}
+              onOpenFinder={(p) => void handleOpenFinder(p)}
+              onOpenIde={(p) => void handleOpenIde(p)}
+              onOpenUrl={(u) => void handleOpenUrl(u)}
+            />
+          )}
 
-        {activeTab === "disk" && (
-          <DiskAnalyzerView
-            onOpenFinder={(p) => void handleOpenFinder(p)}
-            onRefreshTelemetry={refreshTelemetry}
-            onNotify={showToast}
-          />
-        )}
+          {activeTab === "disk" && (
+            <DiskAnalyzerView
+              onOpenFinder={(p) => void handleOpenFinder(p)}
+              onRefreshTelemetry={refreshTelemetry}
+              onNotify={showToast}
+            />
+          )}
 
-        {activeTab === "clients" && (
-          <ClientsView
-            clients={clients}
-            projects={clientProjects}
-            workspaces={workspaces}
-            workspaceProjects={scanReport?.projects ?? []}
-            onReloadClients={refreshClientsAndProjects}
-            onRescanWorkspaces={refreshWorkspacesAndProjects}
-            onAddWorkspace={() => void handleAddWorkspace()}
-            onAssignProject={handleAssignProjectToClient}
-            onConnectRemote={handleConnectRemoteClient}
-            onOpenFinder={(p) => void handleOpenFinder(p)}
-            onOpenIde={(p) => void handleOpenIde(p)}
-            onOpenUrl={(u) => void handleOpenUrl(u)}
-            onNotify={showToast}
-          />
-        )}
+          {activeTab === "clients" && (
+            <ClientsView
+              clients={clients}
+              projects={clientProjects}
+              workspaces={workspaces}
+              workspaceProjects={scanReport?.projects ?? []}
+              onReloadClients={refreshClientsAndProjects}
+              onRescanWorkspaces={refreshWorkspacesAndProjects}
+              onAddWorkspace={() => void handleAddWorkspace()}
+              onAssignProject={handleAssignProjectToClient}
+              onConnectRemote={handleConnectRemoteClient}
+              onOpenFinder={(p) => void handleOpenFinder(p)}
+              onOpenIde={(p) => void handleOpenIde(p)}
+              onOpenUrl={(u) => void handleOpenUrl(u)}
+              onNotify={showToast}
+            />
+          )}
 
-        {activeTab === "git" && (
-          <GitView
-            workspaces={workspaces}
-            onOpenIde={(p) => void handleOpenIde(p)}
-            onOpenUrl={(u) => void handleOpenUrl(u)}
-            onOpenFinder={(p) => void handleOpenFinder(p)}
-            onNavigateSettings={() => setActiveTab("settings")}
-            onProjectsChanged={refreshWorkspacesAndProjects}
-            onNotify={showToast}
-          />
-        )}
+          {activeTab === "git" && (
+            <GitView
+              workspaces={workspaces}
+              onOpenIde={(p) => void handleOpenIde(p)}
+              onOpenUrl={(u) => void handleOpenUrl(u)}
+              onOpenFinder={(p) => void handleOpenFinder(p)}
+              onNavigateSettings={() => setActiveTab("settings")}
+              onProjectsChanged={refreshWorkspacesAndProjects}
+              onNotify={showToast}
+            />
+          )}
 
-        {activeTab === "knowledge" && (
-          <KnowledgeView
-            settings={settings}
-            onSaveSettings={handleSaveSettings}
-            onOpenFinder={(p) => void handleOpenFinder(p)}
-            onNotify={showToast}
-          />
-        )}
+          {activeTab === "knowledge" && (
+            <KnowledgeView
+              settings={settings}
+              onSaveSettings={handleSaveSettings}
+              onOpenFinder={(p) => void handleOpenFinder(p)}
+              onNotify={showToast}
+            />
+          )}
 
-        {activeTab === "studio" && (
-          <StudioDevOpsView
-            onOpenFinder={(p) => void handleOpenFinder(p)}
-            onRefreshTelemetry={refreshTelemetry}
-            onNotify={showToast}
-          />
-        )}
+          {activeTab === "studio" && (
+            <StudioDevOpsView
+              onOpenFinder={(p) => void handleOpenFinder(p)}
+              onRefreshTelemetry={refreshTelemetry}
+              onNotify={showToast}
+            />
+          )}
 
-        {activeTab === "settings" && (
-          <SettingsView
-            workspaces={workspaces}
-            settings={settings}
-            onAddWorkspace={() => void handleAddWorkspace()}
-            onRemoveWorkspace={handleRemoveWorkspace}
-            onSaveSettings={handleSaveSettings}
-            onNotify={showToast}
-          />
-        )}
+          {activeTab === "settings" && (
+            <SettingsView
+              workspaces={workspaces}
+              settings={settings}
+              onAddWorkspace={() => void handleAddWorkspace()}
+              onRemoveWorkspace={handleRemoveWorkspace}
+              onSaveSettings={handleSaveSettings}
+              onNotify={showToast}
+            />
+          )}
+        </div>
       </main>
 
       <AiDrawer

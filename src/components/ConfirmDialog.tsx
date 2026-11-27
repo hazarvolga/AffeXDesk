@@ -50,7 +50,7 @@ export function ConfirmDialog({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, busy]);
+  }, [open, busy, title]);
 
   if (!open) return null;
 

@@ -8,8 +8,8 @@ pub fn build_remote_uri(tool: &str, raw_id: &str) -> Result<String, String> {
 
     let valid_chars = cleaned_id
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '@'));
-    if !valid_chars {
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '@' | '[' | ']'));
+    if !valid_chars || !cleaned_id.chars().any(|c| c.is_ascii_alphanumeric()) {
         return Err("Bağlantı ID geçersiz karakterler içeriyor.".to_string());
     }
 
@@ -18,7 +18,16 @@ pub fn build_remote_uri(tool: &str, raw_id: &str) -> Result<String, String> {
         "hoptodesk" => format!("hoptodesk://{cleaned_id}"),
         "anydesk" => format!("anydesk:{cleaned_id}"),
         "vnc" => format!("vnc://{cleaned_id}"),
-        "rdp" => format!("rdp://{cleaned_id}"),
+        "rdp" => {
+            #[cfg(target_os = "macos")]
+            {
+                format!("rdp://full%20address=s:{cleaned_id}")
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                format!("rdp://{cleaned_id}")
+            }
+        }
         "ssh" => format!("ssh://{cleaned_id}"),
         other => {
             return Err(format!(
@@ -39,7 +48,7 @@ pub fn launch_remote_uri(uri: &str) -> Result<(), String> {
             .map_err(|e| format!("Uzak bağlantı başlatılamadı: {e}"))?;
         if !status.success() {
             return Err(format!(
-                "Uzak bağlantı aracı bulunamadı veya açılamadı ({uri}). İlgili uygulamanın (örn. RustDesk) kurulu olduğundan emin olun."
+                "Uzak bağlantı aracı bulunamadı veya açılamadı ({uri}). İlgili uzak bağlantı uygulamasının kurulu ve bu URI şemasını desteklediğinden emin olun."
             ));
         }
         Ok(())
@@ -94,12 +103,27 @@ mod tests {
             build_remote_uri("vnc", "192.168.1.20:5900").unwrap(),
             "vnc://192.168.1.20:5900"
         );
+        assert_eq!(
+            build_remote_uri("vnc", "[::1]:5900").unwrap(),
+            "vnc://[::1]:5900"
+        );
+        assert_eq!(
+            build_remote_uri("ssh", "admin@[fe80::1]").unwrap(),
+            "ssh://admin@[fe80::1]"
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            build_remote_uri("rdp", "10.0.0.5:3389").unwrap(),
+            "rdp://full%20address=s:10.0.0.5:3389"
+        );
     }
 
     #[test]
     fn build_remote_uri_rejects_injection_and_unknown_tools() {
         assert!(build_remote_uri("rustdesk", "123;rm -rf /").is_err());
         assert!(build_remote_uri("rustdesk", "").is_err());
+        assert!(build_remote_uri("rustdesk", "---").is_err());
+        assert!(build_remote_uri("vnc", "::[]").is_err());
         assert!(build_remote_uri("unknown", "123456").is_err());
     }
 }

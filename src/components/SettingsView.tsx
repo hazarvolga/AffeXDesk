@@ -25,6 +25,7 @@ export interface SettingsViewProps {
   onAddWorkspace: () => void;
   onRemoveWorkspace: (id: number) => Promise<void>;
   onSaveSettings: (next: Record<string, string>) => Promise<void>;
+  onNotify?: (tone: "success" | "error" | "info", text: string) => void;
 }
 
 const IDE_OPTIONS = [
@@ -46,6 +47,7 @@ export function SettingsView({
   onAddWorkspace,
   onRemoveWorkspace,
   onSaveSettings,
+  onNotify,
 }: SettingsViewProps) {
   const [defaultIde, setDefaultIde] = useState(settings.default_ide || "code");
   const [refreshSecs, setRefreshSecs] = useState(
@@ -119,9 +121,13 @@ export function SettingsView({
   }
 
   async function handlePickScraplingDir() {
-    const picked = await api.pickWorkspaceDir();
-    if (picked) {
-      setScraplingDir(picked);
+    try {
+      const picked = await api.pickWorkspaceDir();
+      if (picked) {
+        setScraplingDir(picked);
+      }
+    } catch (err) {
+      onNotify?.("error", `Bilgi bankası klasörü seçilemedi: ${String(err)}`);
     }
   }
 
@@ -131,6 +137,8 @@ export function SettingsView({
       await onSaveSettings(buildNextSettings());
       const res = await api.checkAiStatus();
       setAiTestResult(res);
+    } catch (err) {
+      onNotify?.("error", `AI bağlantı testi başarısız: ${String(err)}`);
     } finally {
       setTestingAi(false);
     }
@@ -142,6 +150,11 @@ export function SettingsView({
       await onSaveSettings(buildNextSettings());
       const res = await api.fetchSocialSnapshot();
       setSocialTestResult(res);
+    } catch (err) {
+      onNotify?.(
+        "error",
+        `Sosyal Merkez MCP bağlantı testi başarısız: ${String(err)}`
+      );
     } finally {
       setTestingSocial(false);
     }

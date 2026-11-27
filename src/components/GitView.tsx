@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   Code2,
@@ -81,6 +81,29 @@ export function GitView({
   const [openAfterClone, setOpenAfterClone] = useState(true);
   const [cloning, setCloning] = useState(false);
 
+  const repoRequestIdRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!cloneTarget) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !cloning) {
+        event.preventDefault();
+        event.stopPropagation();
+        setCloneTarget(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cloneTarget, cloning]);
+
   useEffect(() => {
     if (!newWorkspaceDir && workspaces.length > 0) {
       setNewWorkspaceDir(workspaces[0].path);
@@ -103,16 +126,21 @@ export function GitView({
   }, [onNotify]);
 
   const loadRepos = useCallback(async (targetProvider: ProviderKey) => {
+    const reqId = ++repoRequestIdRef.current;
     setLoadingRepos(true);
     setRepoError(null);
     try {
       const list = await api.listRemoteRepos(targetProvider);
+      if (!mountedRef.current || repoRequestIdRef.current !== reqId) return;
       setRepos(list);
     } catch (err) {
+      if (!mountedRef.current || repoRequestIdRef.current !== reqId) return;
       setRepos([]);
       setRepoError(String(err));
     } finally {
-      setLoadingRepos(false);
+      if (mountedRef.current && repoRequestIdRef.current === reqId) {
+        setLoadingRepos(false);
+      }
     }
   }, []);
 

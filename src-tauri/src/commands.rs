@@ -561,6 +561,10 @@ pub fn list_clients(state: State<'_, AppState>) -> Result<Vec<db::ClientRecord>,
         .map_err(|err| format!("failed to list clients: {err}"))
 }
 
+const VALID_REMOTE_TOOLS: [&str; 6] = ["rustdesk", "hoptodesk", "anydesk", "vnc", "rdp", "ssh"];
+const VALID_PROJECT_STATUSES: [&str; 5] = ["lead", "active", "waiting", "review", "done"];
+const VALID_PROJECT_PRIORITIES: [&str; 4] = ["low", "normal", "high", "urgent"];
+
 #[tauri::command]
 pub fn save_client(
     state: State<'_, AppState>,
@@ -568,6 +572,13 @@ pub fn save_client(
 ) -> Result<db::ClientRecord, String> {
     if input.name.trim().is_empty() {
         return Err("Müşteri / firma adı boş olamaz.".to_string());
+    }
+    let normalized_tool = input.remote_tool.trim().to_ascii_lowercase();
+    if !VALID_REMOTE_TOOLS.contains(&normalized_tool.as_str()) {
+        return Err(format!(
+            "Desteklenmeyen uzak bağlantı aracı: '{}'. Geçerli değerler: rustdesk, hoptodesk, anydesk, vnc, rdp, ssh.",
+            input.remote_tool.trim()
+        ));
     }
     state
         .db
@@ -621,6 +632,36 @@ pub fn save_client_project(
 ) -> Result<db::ClientProjectRecord, String> {
     if input.title.trim().is_empty() {
         return Err("Proje adı boş olamaz.".to_string());
+    }
+    let normalized_status = input.status.trim().to_ascii_lowercase();
+    if !VALID_PROJECT_STATUSES.contains(&normalized_status.as_str()) {
+        return Err(format!(
+            "Geçersiz proje durumu: '{}'. Geçerli değerler: lead, active, waiting, review, done.",
+            input.status.trim()
+        ));
+    }
+    let normalized_priority = input.priority.trim().to_ascii_lowercase();
+    if !VALID_PROJECT_PRIORITIES.contains(&normalized_priority.as_str()) {
+        return Err(format!(
+            "Geçersiz öncelik seviyesi: '{}'. Geçerli değerler: low, normal, high, urgent.",
+            input.priority.trim()
+        ));
+    }
+    let trimmed_local_path = input.local_path.trim();
+    if !trimmed_local_path.is_empty() {
+        let existing_projects = state
+            .db
+            .list_client_projects()
+            .map_err(|err| format!("failed to check local_path conflict: {err}"))?;
+        if let Some(conflict) = existing_projects
+            .into_iter()
+            .find(|p| p.local_path.trim() == trimmed_local_path && Some(p.id) != input.id)
+        {
+            return Err(format!(
+                "Bu yerel klasör ('{trimmed_local_path}') zaten '{}' projesine bağlı. Aynı klasör birden fazla projeye atanamaz.",
+                conflict.title
+            ));
+        }
     }
     state
         .db

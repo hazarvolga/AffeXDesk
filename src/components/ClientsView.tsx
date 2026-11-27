@@ -37,7 +37,11 @@ export interface ClientsViewProps {
   onReloadClients: () => Promise<void>;
   onRescanWorkspaces: () => Promise<void>;
   onAddWorkspace: () => void;
-  onAssignProject: (project: ProjectInfo, clientId: number | null) => Promise<void>;
+  onAssignProject: (
+    project: ProjectInfo,
+    clientId: number | null,
+    clientNameHint?: string
+  ) => Promise<void>;
   onConnectRemote: (client: ClientRecord) => Promise<void>;
   onOpenFinder: (path: string) => void;
   onOpenIde: (path: string) => void;
@@ -310,8 +314,8 @@ export function ClientsView({
       setSavingClient(true);
       try {
         const saved = await api.saveClient(clientForm);
-        if (pendingBindProject) {
-          await onAssignProject(pendingBindProject, saved.id);
+        if (!clientForm.id && pendingBindProject) {
+          await onAssignProject(pendingBindProject, saved.id, saved.name);
           setPendingBindProject(null);
         } else {
           onNotify(
@@ -399,6 +403,9 @@ export function ClientsView({
     setDeleting(true);
     try {
       await api.deleteClient(deleteClientTarget.id);
+      if (clientFilter === deleteClientTarget.id) {
+        setClientFilter("all");
+      }
       onNotify("success", `${deleteClientTarget.name} silindi.`);
       setDeleteClientTarget(null);
       await reloadAll();
@@ -407,7 +414,7 @@ export function ClientsView({
     } finally {
       setDeleting(false);
     }
-  }, [deleteClientTarget, onNotify, reloadAll]);
+  }, [deleteClientTarget, clientFilter, onNotify, reloadAll]);
 
   const handleConfirmDeleteProject = useCallback(async () => {
     if (!deleteProjectTarget) return;
@@ -425,6 +432,7 @@ export function ClientsView({
   }, [deleteProjectTarget, onNotify, reloadAll]);
 
   const openNewProjectForm = () => {
+    setPendingBindProject(null);
     if (clients.length === 0) {
       setSubTab("clients");
       setClientForm(EMPTY_CLIENT_FORM);
@@ -477,6 +485,7 @@ export function ClientsView({
             type="button"
             className="btn btn--secondary"
             onClick={() => {
+              setPendingBindProject(null);
               setSubTab("clients");
               setClientForm(EMPTY_CLIENT_FORM);
               setClientFormOpen(true);
@@ -716,7 +725,10 @@ export function ClientsView({
             <button
               type="button"
               className="btn btn--ghost"
-              onClick={() => setClientFormOpen(false)}
+              onClick={() => {
+                setClientFormOpen(false);
+                setPendingBindProject(null);
+              }}
             >
               Vazgeç
             </button>
@@ -1438,6 +1450,7 @@ export function ClientsView({
                         type="button"
                         className="btn btn--ghost btn--sm"
                         onClick={() => {
+                          setPendingBindProject(null);
                           setClientForm({
                             id: client.id,
                             name: client.name,

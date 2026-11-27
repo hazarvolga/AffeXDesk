@@ -48,10 +48,16 @@ function mapActionTab(rawTab: unknown): NavTab {
     case "workspaces":
     case "projects":
       return "projects";
+    case "disk":
+      return "disk";
+    case "clients":
+      return "clients";
     case "git":
       return "git";
     case "knowledge":
       return "knowledge";
+    case "studio":
+      return "studio";
     case "settings":
       return "settings";
     case "social":
@@ -157,27 +163,31 @@ export function AiDrawer({
   }
 
   async function handleExecuteAction(action: CopilotAction) {
-    if (action.kind === "navigate") {
-      const tab = mapActionTab(action.payload?.tab);
-      onNavigate(tab);
-      onClose();
-      return;
+    try {
+      if (action.kind === "navigate") {
+        const tab = mapActionTab(action.payload?.tab);
+        onNavigate(tab);
+        onClose();
+        return;
+      }
+      if (action.kind === "scan_processes") {
+        await onRefreshTelemetry();
+        onNavigate("processes");
+        onNotify("info", "Geliştirici süreçleri yeniden tarandı.");
+        onClose();
+        return;
+      }
+      if (action.kind === "scan_workspaces") {
+        await onRefreshWorkspaces();
+        onNavigate("projects");
+        onNotify("info", "Çalışma alanları yeniden tarandı.");
+        onClose();
+        return;
+      }
+      onNotify("info", `Aksiyon çalıştırıldı: ${action.label}`);
+    } catch (err) {
+      onNotify("error", `Aksiyon çalıştırılamadı: ${String(err)}`);
     }
-    if (action.kind === "scan_processes") {
-      await onRefreshTelemetry();
-      onNavigate("processes");
-      onNotify("info", "Geliştirici süreçleri yeniden tarandı.");
-      onClose();
-      return;
-    }
-    if (action.kind === "scan_workspaces") {
-      await onRefreshWorkspaces();
-      onNavigate("projects");
-      onNotify("info", "Çalışma alanları yeniden tarandı.");
-      onClose();
-      return;
-    }
-    onNotify("info", `Aksiyon çalıştırıldı: ${action.label}`);
   }
 
   if (!open) return null;

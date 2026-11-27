@@ -80,6 +80,11 @@ export function ProjectsView({
   const [editingUrlPath, setEditingUrlPath] = useState<string | null>(null);
   const [urlDraft, setUrlDraft] = useState("");
   const [savingUrl, setSavingUrl] = useState(false);
+  const [unassignTarget, setUnassignTarget] = useState<{
+    project: ProjectInfo;
+    clientName: string;
+  } | null>(null);
+  const [unassigning, setUnassigning] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -107,6 +112,17 @@ export function ProjectsView({
       setCleanTarget(null);
     } finally {
       setCleaning(false);
+    }
+  }
+
+  async function handleConfirmUnassign() {
+    if (!unassignTarget || !onAssignClient) return;
+    setUnassigning(true);
+    try {
+      await onAssignClient(unassignTarget.project, null);
+      setUnassignTarget(null);
+    } finally {
+      setUnassigning(false);
     }
   }
 
@@ -369,10 +385,16 @@ export function ProjectsView({
                         value={linkedClient ? String(linkedClient.id) : ""}
                         onChange={(e) => {
                           const val = e.target.value;
-                          void onAssignClient(
-                            proj,
-                            val ? Number(val) : null
-                          );
+                          if (!val) {
+                            if (linkedProj) {
+                              setUnassignTarget({
+                                project: proj,
+                                clientName: linkedClient?.name ?? "Müşteri",
+                              });
+                            }
+                            return;
+                          }
+                          void onAssignClient(proj, Number(val));
                         }}
                         aria-label={`${proj.name} müşteri ata`}
                       >
@@ -457,6 +479,24 @@ export function ProjectsView({
         busy={cleaning}
         onConfirm={handleConfirmClean}
         onCancel={() => setCleanTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={unassignTarget !== null}
+        title="Müşteri Bağlantısını Kaldır"
+        description={
+          unassignTarget
+            ? `"${unassignTarget.project.name}" projesinin "${unassignTarget.clientName}" müşterisiyle bağlantısı kaldırılacak ve takip panosundaki proje kaydı (notlar, teslim tarihi, ilerleme) silinecek. Yerel klasörünüze dokunulmaz.`
+            : ""
+        }
+        confirmLabel="Bağlantıyı Kaldır"
+        cancelLabel="Vazgeç"
+        tone="danger"
+        busy={unassigning}
+        onConfirm={() => void handleConfirmUnassign()}
+        onCancel={() => {
+          if (!unassigning) setUnassignTarget(null);
+        }}
       />
     </div>
   );

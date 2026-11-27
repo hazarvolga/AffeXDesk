@@ -9,7 +9,7 @@ use sysinfo::Disks;
 
 const MAX_ENTRIES: usize = 40;
 const MAX_SCAN_THREADS: usize = 10;
-const DU_TIMEOUT_SECS: u64 = 25;
+const DU_TIMEOUT_SECS: u64 = 45;
 const QUICK_WINS_CACHE_TTL_SECS: u64 = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,6 +261,7 @@ fn protected_paths_for_home(home: Option<&Path>) -> Vec<PathBuf> {
         PathBuf::from("/Applications"),
         PathBuf::from("/Users"),
         PathBuf::from("/Library"),
+        PathBuf::from("/Library/Application Support"),
         PathBuf::from("/usr"),
         PathBuf::from("/bin"),
         PathBuf::from("/sbin"),
@@ -269,6 +270,7 @@ fn protected_paths_for_home(home: Option<&Path>) -> Vec<PathBuf> {
         PathBuf::from("/private"),
         PathBuf::from("/Volumes"),
         PathBuf::from("/opt"),
+        PathBuf::from("/opt/homebrew"),
     ];
 
     if let Some(h) = home {
@@ -291,6 +293,7 @@ fn protected_paths_for_home(home: Option<&Path>) -> Vec<PathBuf> {
         ] {
             protected.push(h_norm.join(sub));
         }
+        protected.push(h_norm.join("Library").join("Application Support"));
     }
 
     protected
@@ -313,9 +316,20 @@ fn protected_prefix_paths_for_home(home: Option<&Path>) -> Vec<PathBuf> {
         prefixes.push(h_norm.join(".ssh"));
         prefixes.push(h_norm.join(".gnupg"));
         prefixes.push(h_norm.join("Library").join("Keychains"));
+        prefixes.push(
+            h_norm
+                .join("Library")
+                .join("Containers")
+                .join("com.docker.docker"),
+        );
     }
 
     prefixes
+}
+
+fn has_git_component(path: &Path) -> bool {
+    path.components()
+        .any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case(".git"))
 }
 
 fn is_protected_windows_path(raw: &str) -> bool {
@@ -641,7 +655,7 @@ fn measure_dir_size(path: &Path, include_protected: bool) -> u64 {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn measure_dir_size_raw(path: &Path) -> u64 {
+fn measure_dir_size_raw_opt(path: &Path) -> Option<u64> {
     use std::io::Read;
     use std::process::{Command, Stdio};
 
@@ -652,7 +666,7 @@ fn measure_dir_size_raw(path: &Path) -> u64 {
         .stderr(Stdio::null())
         .spawn()
     else {
-        return dir_size_recursive_fs(path);
+        return Some(dir_size_recursive_fs(path));
     };
 
     let started = Instant::now();
@@ -665,26 +679,36 @@ fn measure_dir_size_raw(path: &Path) -> u64 {
                 }
                 if let Some(first_token) = out.split_whitespace().next() {
                     if let Ok(kb) = first_token.parse::<u64>() {
-                        return kb.saturating_mul(1024);
+                        return Some(kb.saturating_mul(1024));
                     }
                 }
-                return 0;
+                return Some(0);
             }
             Ok(None) => {
                 if started.elapsed() >= Duration::from_secs(DU_TIMEOUT_SECS) {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return 0;
+                    return None;
                 }
                 std::thread::sleep(Duration::from_millis(40));
             }
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return 0;
+                return None;
             }
         }
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn measure_dir_size_raw(path: &Path) -> u64 {
+    measure_dir_size_raw_opt(path).unwrap_or(0)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn measure_dir_size_raw_opt(path: &Path) -> Option<u64> {
+    Some(dir_size_recursive_fs(path))
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -744,6 +768,39 @@ fn measure_paths_parallel(items: &[(String, PathBuf, bool)], include_protected: 
     results
         .into_iter()
         .map(|m| m.into_inner().unwrap_or(0))
+        .collect()
+}
+
+fn measure_dirs_parallel_opt(paths: &[PathBuf]) -> Vec<Option<u64>> {
+    let len = paths.len();
+    if len == 0 {
+        return Vec::new();
+    }
+
+    let results: Vec<Mutex<Option<u64>>> = (0..len).map(|_| Mutex::new(None)).collect();
+    let cursor = AtomicUsize::new(0);
+    let worker_count = len.clamp(1, MAX_SCAN_THREADS);
+
+    std::thread::scope(|scope| {
+        for _ in 0..worker_count {
+            let cursor_ref = &cursor;
+            let results_ref = &results;
+            scope.spawn(move || loop {
+                let idx = cursor_ref.fetch_add(1, Ordering::Relaxed);
+                if idx >= len {
+                    break;
+                }
+                let size_opt = measure_dir_size_raw_opt(&paths[idx]);
+                if let Ok(mut slot) = results_ref[idx].lock() {
+                    *slot = size_opt;
+                }
+            });
+        }
+    });
+
+    results
+        .into_iter()
+        .map(|m| m.into_inner().unwrap_or(None))
         .collect()
 }
 
@@ -1083,7 +1140,7 @@ pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
     let home = dirs::home_dir();
     let target = expand_tilde(trimmed, home.as_deref());
 
-    if is_protected_path_with_home(&target, home.as_deref()) {
+    if is_protected_path_with_home(&target, home.as_deref()) || has_git_component(&target) {
         return Err("protected_path".to_string());
     }
 
@@ -1110,7 +1167,7 @@ pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
             target.to_string_lossy()
         )
     })?;
-    if is_protected_path_with_home(&canonical, home.as_deref()) {
+    if is_protected_path_with_home(&canonical, home.as_deref()) || has_git_component(&canonical) {
         return Err("protected_path".to_string());
     }
 
@@ -1150,7 +1207,7 @@ pub fn move_path_to_trash(path: &str) -> Result<u64, String> {
                         .and_then(|n| n.to_str())
                         .unwrap_or("trashed_item");
                     let mut dest = trash_dir.join(base_name);
-                    if dest.exists() {
+                    if fs::symlink_metadata(&dest).is_ok() {
                         let ts = chrono::Utc::now().timestamp_millis();
                         dest = trash_dir.join(format!("{base_name}_{ts}"));
                     }
@@ -1235,6 +1292,7 @@ if (Test-Path -LiteralPath $p -PathType Container) {
     }
 
     invalidate_all_disk_caches();
+    crate::cleaner::invalidate_cleaner_cache();
     Ok(reclaimed_bytes)
 }
 
@@ -1305,7 +1363,7 @@ pub fn scan_disk_ai_models(active_model_ids: &[String]) -> Vec<DiskAiModel> {
             }
             let name = entry.file_name().to_string_lossy().to_string();
             if let Some(rest) = name.strip_prefix("models--") {
-                let display = rest.replace("--", "/");
+                let display = rest.replacen("--", "/", 1);
                 candidates.push((display, "huggingface".to_string(), path));
             }
         }
@@ -1375,18 +1433,19 @@ pub fn scan_disk_ai_models(active_model_ids: &[String]) -> Vec<DiskAiModel> {
         }
     }
 
-    let measure_input: Vec<(String, PathBuf, bool)> = candidates
-        .iter()
-        .map(|(id, _, p)| (id.clone(), p.clone(), true))
-        .collect();
-    let sizes = measure_paths_parallel(&measure_input, false);
+    let measure_paths: Vec<PathBuf> = candidates.iter().map(|(_, _, p)| p.clone()).collect();
+    let sizes = measure_dirs_parallel_opt(&measure_paths);
 
     let mut models: Vec<DiskAiModel> = candidates
         .into_iter()
         .zip(sizes)
-        .map(|((id, provider, path), size_bytes)| {
+        .map(|((id, provider, path), measured_size)| {
             let days = days_since_modified(&path);
-            let is_incomplete = size_bytes < 10 * 1024 * 1024 || dir_has_incomplete_blobs(&path);
+            let size_bytes = measured_size.unwrap_or(0);
+            let is_incomplete = match measured_size {
+                Some(sz) => sz < 10 * 1024 * 1024 || dir_has_incomplete_blobs(&path),
+                None => dir_has_incomplete_blobs(&path),
+            };
             let norm_id = normalize_model_key(&id);
             let is_active = !is_incomplete
                 && active_set.iter().any(|live| {
@@ -1434,15 +1493,7 @@ pub fn delete_path_permanently(path: &str) -> Result<u64, String> {
     let home = dirs::home_dir();
     let target = expand_tilde(trimmed, home.as_deref());
 
-    if is_protected_path_with_home(&target, home.as_deref()) {
-        return Err("protected_path".to_string());
-    }
-
-    // `.git` dizini veya içindeki herhangi bir dosya kalıcı silinemez
-    if target
-        .components()
-        .any(|c| c.as_os_str().to_string_lossy() == ".git")
-    {
+    if is_protected_path_with_home(&target, home.as_deref()) || has_git_component(&target) {
         return Err("protected_path".to_string());
     }
 
@@ -1470,7 +1521,7 @@ pub fn delete_path_permanently(path: &str) -> Result<u64, String> {
         )
     })?;
 
-    if is_protected_path_with_home(&canonical, home.as_deref()) {
+    if is_protected_path_with_home(&canonical, home.as_deref()) || has_git_component(&canonical) {
         return Err("protected_path".to_string());
     }
 
@@ -1523,6 +1574,18 @@ mod tests {
         );
         assert_eq!(
             delete_path_permanently("/tmp/demo/.git"),
+            Err("protected_path".to_string())
+        );
+        assert_eq!(
+            delete_path_permanently("/tmp/demo/.GIT/config"),
+            Err("protected_path".to_string())
+        );
+        assert_eq!(
+            move_path_to_trash("/tmp/demo/.git"),
+            Err("protected_path".to_string())
+        );
+        assert_eq!(
+            move_path_to_trash("/tmp/demo/.GIT/HEAD"),
             Err("protected_path".to_string())
         );
 
@@ -1689,6 +1752,16 @@ mod tests {
         assert!(is_protected_path_with_home(Path::new("/Users/tester/.ssh/id_ed25519"), Some(fake_home)));
         assert!(is_protected_path_with_home(Path::new("/Users/tester/.gnupg/pubring.kbx"), Some(fake_home)));
         assert!(is_protected_path_with_home(Path::new("/Users/tester/Library/Keychains/login.keychain-db"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/Library/Containers/com.docker.docker"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"), Some(fake_home)));
+
+        // Application Support & Homebrew root protection (but allow children)
+        assert!(is_protected_path_with_home(Path::new("/Users/tester/Library/Application Support"), Some(fake_home)));
+        assert!(!is_protected_path_with_home(Path::new("/Users/tester/Library/Application Support/SomeApp"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/Library/Application Support"), Some(fake_home)));
+        assert!(!is_protected_path_with_home(Path::new("/Library/Application Support/SomeApp"), Some(fake_home)));
+        assert!(is_protected_path_with_home(Path::new("/opt/homebrew"), Some(fake_home)));
+        assert!(!is_protected_path_with_home(Path::new("/opt/homebrew/Cellar"), Some(fake_home)));
 
         // Windows system roots
         assert!(is_protected_path_with_home(Path::new("C:\\"), Some(fake_home)));

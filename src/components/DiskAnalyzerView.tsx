@@ -24,7 +24,10 @@ import {
 } from "../lib/api";
 import { formatBytes, formatPct } from "../lib/format";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { SmartCleanerPanel } from "./SmartCleanerPanel";
+import {
+  clearSmartCleanerUiCache,
+  SmartCleanerPanel,
+} from "./SmartCleanerPanel";
 
 export interface DiskAnalyzerViewProps {
   onOpenFinder: (path: string) => void;
@@ -295,11 +298,10 @@ export function DiskAnalyzerView({
       if (!options?.force) {
         const cached =
           directoryScanCache.get(key) ??
-          (targetDir === null
-            ? directoryScanCache.get(cacheKeyForDir(null, !useFull)) ??
-              (lastDiskScanState?.currentDir === null
-                ? lastDiskScanState
-                : undefined)
+          (targetDir === null &&
+          lastDiskScanState?.currentDir === null &&
+          Boolean(lastDiskScanState.includeProtected) === useFull
+            ? lastDiskScanState
             : undefined);
         if (cached) {
           setReport(cached.report);
@@ -465,6 +467,7 @@ export function DiskAnalyzerView({
       setPermDeleteTarget(null);
       setPermDeleteStep(1);
       clearDiskAnalyzerCache();
+      clearSmartCleanerUiCache();
       await Promise.all([
         loadDirectory(currentDir, { force: true }),
         loadAiModels(true),
@@ -528,6 +531,7 @@ export function DiskAnalyzerView({
       );
       setTrashTarget(null);
       clearDiskAnalyzerCache();
+      clearSmartCleanerUiCache();
       await Promise.all([
         loadDirectory(currentDir, { force: true }),
         loadAiModels(true),
@@ -786,7 +790,7 @@ export function DiskAnalyzerView({
             {report ? formatBytes(report.disk_available_bytes) : "—"}
           </div>
           <p className="metric-card__meta">
-            Tüm silme işlemleri geri alınabilir Çöp Sepetine taşınır.
+            Çöpe Taşı geri alınabilir, Kalıcı Sil 2 aşamalı onay ister.
           </p>
         </article>
       </section>
@@ -1322,6 +1326,7 @@ export function DiskAnalyzerView({
             {visibleEntries.map((entry) => {
               const catStyle = getCategoryStyle(entry.category);
               const barPct = Math.min(100, Math.max(1.5, entry.pct_of_parent));
+              const isDockerVm = isDockerContainerPath(entry.path);
               return (
                 <li key={entry.path} className="disk-entry-row">
                   <div className="disk-entry-row__left">
@@ -1399,26 +1404,39 @@ export function DiskAnalyzerView({
                     >
                       Finder&apos;da Aç
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn--danger-soft btn--sm"
-                      onClick={() => setTrashTarget(entry)}
-                      disabled={trashing || permDeleting}
-                      aria-label={`Çöpe Taşı: ${entry.name}`}
-                    >
-                      <Trash2 size={13} />
-                      <span>Çöpe Taşı</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--danger btn--sm"
-                      onClick={() => openPermanentDelete(entry)}
-                      disabled={trashing || permDeleting}
-                      aria-label={`Kalıcı Sil: ${entry.name}`}
-                    >
-                      <Flame size={13} />
-                      <span>Kalıcı Sil</span>
-                    </button>
+                    {isDockerVm ? (
+                      <button
+                        type="button"
+                        className="btn btn--primary btn--sm"
+                        onClick={() => setSubTab("cleaner")}
+                      >
+                        <Sparkles size={13} />
+                        <span>Akıllı Temizleyici ile Temizle</span>
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn--danger-soft btn--sm"
+                          onClick={() => setTrashTarget(entry)}
+                          disabled={trashing || permDeleting}
+                          aria-label={`Çöpe Taşı: ${entry.name}`}
+                        >
+                          <Trash2 size={13} />
+                          <span>Çöpe Taşı</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--danger btn--sm"
+                          onClick={() => openPermanentDelete(entry)}
+                          disabled={trashing || permDeleting}
+                          aria-label={`Kalıcı Sil: ${entry.name}`}
+                        >
+                          <Flame size={13} />
+                          <span>Kalıcı Sil</span>
+                        </button>
+                      </>
+                    )}
                   </div>
                 </li>
               );

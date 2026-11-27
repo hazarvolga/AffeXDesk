@@ -162,7 +162,11 @@ export default function App() {
   }, []);
 
   const handleAssignProjectToClient = useCallback(
-    async (project: ProjectInfo, clientId: number | null) => {
+    async (
+      project: ProjectInfo,
+      clientId: number | null,
+      clientNameHint?: string
+    ) => {
       try {
         const existing = clientProjects.find(
           (cp) => cp.local_path && cp.local_path === project.path
@@ -192,7 +196,9 @@ export default function App() {
             notes: existing?.notes || "",
           });
           const clientName =
-            clients.find((c) => c.id === clientId)?.name ?? "Müşteri";
+            clientNameHint ||
+            clients.find((c) => c.id === clientId)?.name ||
+            "Müşteri";
           showToast(
             "success",
             `${project.name} → ${clientName} müşterisine bağlandı.`
@@ -784,6 +790,7 @@ export default function App() {
             onFilterChange={setProcessFilter}
             onRefresh={() => void refreshTelemetry()}
             onKillProcess={handleKillProcess}
+            onNotify={showToast}
           />
         )}
 
@@ -872,6 +879,7 @@ export default function App() {
             onAddWorkspace={() => void handleAddWorkspace()}
             onRemoveWorkspace={handleRemoveWorkspace}
             onSaveSettings={handleSaveSettings}
+            onNotify={showToast}
           />
         )}
       </main>

@@ -672,4 +672,168 @@ mod tests {
         assert!(!db.delete_setting("theme").expect("delete missing theme"));
         assert_eq!(db.get_setting("theme").expect("get deleted theme"), None);
     }
+
+    #[test]
+    fn test_clients_and_projects_crud_and_cascade_delete() {
+        let db = Database::open_in_memory().expect("open in-memory db");
+
+        // 1. Insert clients
+        let client_a = db
+            .save_client(&ClientInput {
+                id: None,
+                name: "  Acme Corp  ".to_string(),
+                contact_name: "Ali Veli".to_string(),
+                contact_info: "ali@acme.test".to_string(),
+                remote_tool: "RustDesk".to_string(),
+                remote_id: "123 456 789".to_string(),
+                os_info: "macOS".to_string(),
+                notes: "VIP".to_string(),
+            })
+            .expect("insert client_a");
+        assert_eq!(client_a.name, "Acme Corp");
+        assert_eq!(client_a.remote_tool, "rustdesk");
+        assert_eq!(client_a.last_connected_at, None);
+
+        let client_b = db
+            .save_client(&ClientInput {
+                id: None,
+                name: "Beta Ltd".to_string(),
+                contact_name: "".to_string(),
+                contact_info: "".to_string(),
+                remote_tool: "ssh".to_string(),
+                remote_id: "ops@[::1]".to_string(),
+                os_info: "Linux".to_string(),
+                notes: "".to_string(),
+            })
+            .expect("insert client_b");
+
+        assert_eq!(db.list_clients().expect("list clients").len(), 2);
+        assert_eq!(
+            db.get_client(client_a.id).expect("get client_a"),
+            Some(client_a.clone())
+        );
+
+        // 2. Update client_a & touch last_connected_at
+        let updated_a = db
+            .save_client(&ClientInput {
+                id: Some(client_a.id),
+                name: "Acme Holdings".to_string(),
+                contact_name: "Ayse Yilmaz".to_string(),
+                contact_info: "ayse@acme.test".to_string(),
+                remote_tool: "VNC".to_string(),
+                remote_id: "10.0.0.5:5900".to_string(),
+                os_info: "macOS 15".to_string(),
+                notes: "Updated".to_string(),
+            })
+            .expect("update client_a");
+        assert_eq!(updated_a.id, client_a.id);
+        assert_eq!(updated_a.name, "Acme Holdings");
+        assert_eq!(updated_a.remote_tool, "vnc");
+
+        let touched_ts = db
+            .touch_client_connected(client_a.id)
+            .expect("touch connected");
+        assert!(touched_ts.is_some());
+        assert_eq!(
+            db.get_client(client_a.id)
+                .expect("get touched client")
+                .expect("exists")
+                .last_connected_at,
+            touched_ts
+        );
+
+        // 3. Insert & update client_projects
+        let proj_a1 = db
+            .save_client_project(&ClientProjectInput {
+                id: None,
+                client_id: client_a.id,
+                title: "  Portal v2  ".to_string(),
+                status: "ACTIVE".to_string(),
+                priority: "HIGH".to_string(),
+                progress_pct: 150, // clamped to 100
+                due_date: "2026-12-31".to_string(),
+                local_path: "/dev/acme-portal".to_string(),
+                live_url: "https://portal.acme.test".to_string(),
+                notes: "Phase 1".to_string(),
+            })
+            .expect("insert proj_a1");
+        assert_eq!(proj_a1.title, "Portal v2");
+        assert_eq!(proj_a1.status, "active");
+        assert_eq!(proj_a1.priority, "high");
+        assert_eq!(proj_a1.progress_pct, 100);
+
+        let proj_a2 = db
+            .save_client_project(&ClientProjectInput {
+                id: None,
+                client_id: client_a.id,
+                title: "Mobile App".to_string(),
+                status: "lead".to_string(),
+                priority: "low".to_string(),
+                progress_pct: -10, // clamped to 0
+                due_date: "".to_string(),
+                local_path: "/dev/acme-mobile".to_string(),
+                live_url: "".to_string(),
+                notes: "".to_string(),
+            })
+            .expect("insert proj_a2");
+        assert_eq!(proj_a2.progress_pct, 0);
+
+        let proj_b1 = db
+            .save_client_project(&ClientProjectInput {
+                id: None,
+                client_id: client_b.id,
+                title: "Beta API".to_string(),
+                status: "review".to_string(),
+                priority: "urgent".to_string(),
+                progress_pct: 80,
+                due_date: "".to_string(),
+                local_path: "/dev/beta-api".to_string(),
+                live_url: "".to_string(),
+                notes: "".to_string(),
+            })
+            .expect("insert proj_b1");
+
+        let updated_proj = db
+            .save_client_project(&ClientProjectInput {
+                id: Some(proj_a1.id),
+                client_id: client_a.id,
+                title: "Portal v2.1".to_string(),
+                status: "done".to_string(),
+                priority: "normal".to_string(),
+                progress_pct: 100,
+                due_date: "2026-12-31".to_string(),
+                local_path: "/dev/acme-portal".to_string(),
+                live_url: "https://portal.acme.test".to_string(),
+                notes: "Shipped".to_string(),
+            })
+            .expect("update proj_a1");
+        assert_eq!(updated_proj.id, proj_a1.id);
+        assert_eq!(updated_proj.title, "Portal v2.1");
+        assert_eq!(updated_proj.status, "done");
+
+        assert_eq!(db.list_client_projects().expect("list projects").len(), 3);
+
+        // Delete single project
+        assert!(db
+            .delete_client_project(proj_a2.id)
+            .expect("delete proj_a2"));
+        assert!(!db
+            .delete_client_project(proj_a2.id)
+            .expect("delete missing proj_a2"));
+        assert_eq!(db.list_client_projects().expect("list after delete").len(), 2);
+
+        // 4. ON DELETE CASCADE: deleting client_a removes proj_a1, leaves proj_b1 intact
+        assert!(db.delete_client(client_a.id).expect("delete client_a"));
+        assert!(!db
+            .delete_client(client_a.id)
+            .expect("delete missing client_a"));
+        assert_eq!(db.get_client(client_a.id).expect("get deleted client_a"), None);
+
+        let remaining_projects = db
+            .list_client_projects()
+            .expect("list projects after cascade");
+        assert_eq!(remaining_projects.len(), 1);
+        assert_eq!(remaining_projects[0].id, proj_b1.id);
+        assert_eq!(remaining_projects[0].client_id, client_b.id);
+    }
 }

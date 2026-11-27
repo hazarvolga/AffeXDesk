@@ -203,7 +203,7 @@ describe("App", () => {
     });
     mockedApi.scanEnvHygiene.mockResolvedValue([]);
     mockedApi.scanDiskBreakdown.mockResolvedValue({
-      root_path: "/Users/hazar",
+      root_path: "/Users/tester",
       parent_path: "/Users",
       total_scanned_bytes: 900 * 1024 ** 3,
       disk_total_bytes: 2000 * 1024 ** 3,
@@ -212,7 +212,7 @@ describe("App", () => {
       entries: [
         {
           name: "Library",
-          path: "/Users/hazar/Library",
+          path: "/Users/tester/Library",
           size_bytes: 420 * 1024 ** 3,
           pct_of_parent: 46.7,
           is_dir: true,
@@ -222,7 +222,7 @@ describe("App", () => {
         },
         {
           name: "huggingface",
-          path: "/Users/hazar/.cache/huggingface",
+          path: "/Users/tester/.cache/huggingface",
           size_bytes: 280 * 1024 ** 3,
           pct_of_parent: 31.1,
           is_dir: true,
@@ -248,7 +248,7 @@ describe("App", () => {
       quick_wins: [
         {
           name: "HuggingFace Cache",
-          path: "/Users/hazar/.cache/huggingface",
+          path: "/Users/tester/.cache/huggingface",
           size_bytes: 280 * 1024 ** 3,
           pct_of_parent: 31.1,
           is_dir: true,
@@ -345,7 +345,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Library$/i }));
     await waitFor(() => {
       expect(mockedApi.scanDiskBreakdown).toHaveBeenCalledWith(
-        "/Users/hazar/Library",
+        "/Users/tester/Library",
         true
       );
     });
@@ -356,7 +356,7 @@ describe("App", () => {
     );
     const dialog = screen.getByRole("alertdialog");
     expect(dialog).toBeInTheDocument();
-    expect(dialog).toHaveTextContent("/Users/hazar/.cache/huggingface");
+    expect(dialog).toHaveTextContent("/Users/tester/.cache/huggingface");
 
     const confirmButtons = screen.getAllByRole("button", {
       name: /^Çöpe Taşı$/i,
@@ -365,7 +365,7 @@ describe("App", () => {
 
     await waitFor(() => {
       expect(mockedApi.movePathToTrash).toHaveBeenCalledWith(
-        "/Users/hazar/.cache/huggingface"
+        "/Users/tester/.cache/huggingface"
       );
     });
   });

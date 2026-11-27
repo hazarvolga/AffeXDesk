@@ -162,11 +162,35 @@ export function SmartCleanerPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const toggleItem = useCallback((id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  }, []);
+  const toggleItem = useCallback(
+    (id: string) => {
+      const conflictId =
+        id === "docker_stopped_containers"
+          ? "docker_unused_volumes"
+          : id === "docker_unused_volumes"
+          ? "docker_stopped_containers"
+          : null;
+      if (
+        !selectedIds.includes(id) &&
+        conflictId &&
+        selectedIds.includes(conflictId)
+      ) {
+        setSelectedIds((prev) => [
+          ...prev.filter((x) => x !== conflictId && x !== id),
+          id,
+        ]);
+        onNotify(
+          "info",
+          "Güvenlik nedeniyle Durmuş Docker Konteynerleri ve Kullanılmayan Docker Volume'leri aynı anda seçilemez; diğer seçim kaldırıldı."
+        );
+        return;
+      }
+      setSelectedIds((prev) =>
+        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      );
+    },
+    [selectedIds, onNotify]
+  );
 
   const selectAllSafe = useCallback(() => {
     if (!report) return;
@@ -210,7 +234,12 @@ export function SmartCleanerPanel({
       const result = await api.runSystemCleaner(selectedIds);
       updateLastRun(result);
       setConfirmOpen(false);
-      if (result.succeeded > 0) {
+      if (result.succeeded > 0 && result.failed > 0) {
+        onNotify(
+          "info",
+          `Temizlik kısmen tamamlandı: ${formatBytes(result.total_freed_bytes)} geri kazanıldı (${result.succeeded} başarılı, ${result.failed} başarısız).`
+        );
+      } else if (result.succeeded > 0) {
         onNotify(
           "success",
           `Temizlik tamamlandı: ${formatBytes(result.total_freed_bytes)} geri kazanıldı (${result.succeeded} kalem).`
@@ -342,7 +371,7 @@ export function SmartCleanerPanel({
             {report ? formatBytes(report.safe_reclaimable_bytes) : "—"}
           </div>
           <p className="metric-card__meta">
-            Build cache, kullanılmayan imajlar ve paket depoları
+            Build cache ve paket depoları
           </p>
         </article>
 

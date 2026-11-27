@@ -23,6 +23,7 @@ export interface ProcessesViewProps {
   onFilterChange: (filter: ProcessFilter) => void;
   onRefresh: () => void;
   onKillProcess: (pid: number, force: boolean) => Promise<void>;
+  onNotify?: (tone: "success" | "error" | "info", text: string) => void;
 }
 
 interface ProcessOwner {
@@ -149,6 +150,7 @@ export function ProcessesView({
   onFilterChange,
   onRefresh,
   onKillProcess,
+  onNotify,
 }: ProcessesViewProps) {
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grouped" | "flat">("grouped");
@@ -486,11 +488,20 @@ export function ProcessesView({
                       <button
                         type="button"
                         className="btn btn--ghost btn--sm"
-                        onClick={() =>
-                          void api.openInFileManager({
-                            path: group.owner.openablePath!,
-                          })
-                        }
+                        onClick={() => {
+                          const targetPath = group.owner.openablePath;
+                          if (!targetPath) return;
+                          void (async () => {
+                            try {
+                              await api.openInFileManager({ path: targetPath });
+                            } catch (err) {
+                              onNotify?.(
+                                "error",
+                                `Dosya yöneticisi açılamadı: ${String(err)}`,
+                              );
+                            }
+                          })();
+                        }}
                         title="Proje klasörünü Finder'da aç"
                       >
                         <FolderOpen size={13} />

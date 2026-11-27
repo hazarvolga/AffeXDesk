@@ -166,7 +166,7 @@ fn run_cli_with_timeout(bin: &str, args: &[&str], timeout_secs: u64) -> Result<S
 }
 
 fn run_cli(bin: &str, args: &[&str]) -> Result<String, String> {
-    run_cli_with_timeout(bin, args, 90)
+    run_cli_with_timeout(bin, args, 300)
 }
 
 /// Parses human size strings from Docker CLI such as:
@@ -274,7 +274,7 @@ fn parse_docker_df_json_lines(stdout: &str) -> DockerDfSummary {
 }
 
 fn inspect_docker_df() -> DockerDfSummary {
-    match run_cli_with_timeout("docker", &["system", "df", "--format", "{{json .}}"], 15) {
+    match run_cli_with_timeout("docker", &["system", "df", "--format", "{{json .}}"], 180) {
         Ok(stdout) => parse_docker_df_json_lines(&stdout),
         Err(_) => DockerDfSummary::default(),
     }
